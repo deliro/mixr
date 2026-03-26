@@ -7,6 +7,8 @@ mod filters;
 #[allow(dead_code)]
 mod scanner;
 #[allow(dead_code)]
+mod tui;
+#[allow(dead_code)]
 mod types;
 
 fn main() {
