@@ -455,7 +455,21 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             }
 
             match &mut model.phase {
-                Phase::Setup(form) => update_setup(form, key),
+                Phase::Setup(form) => {
+                    let effect = update_setup(form, key);
+                    if let Effect::StartScan(ref config) = effect {
+                        model.phase = Phase::Scanning {
+                            config: config.clone(),
+                            state: ScanState {
+                                files_found: 0,
+                                files_matched: 0,
+                                last_path: None,
+                                spinner_tick: 0,
+                            },
+                        };
+                    }
+                    effect
+                }
                 Phase::Done { .. } | Phase::FatalError(_) => {
                     if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
                         model.should_quit = true;
@@ -648,9 +662,43 @@ pub fn field_is_invalid(field: SetupField, value: &str) -> bool {
         SetupField::Size | SetupField::MinSize => ByteSize::parse(value).is_err(),
         SetupField::Source => {
             let resolved = resolve_path_value(value);
-            !std::path::Path::new(&resolved).is_dir()
+            let path = std::path::Path::new(&resolved);
+            !path.is_dir() || std::fs::read_dir(path).is_err()
+        }
+        SetupField::Destination => {
+            let resolved = resolve_path_value(value);
+            !is_writable_or_creatable(&resolved)
         }
         _ => false,
+    }
+}
+
+fn is_writable_or_creatable(path: &str) -> bool {
+    let p = std::path::Path::new(path);
+    if p.is_dir() {
+        return is_dir_writable(p);
+    }
+    let mut ancestor = p.to_path_buf();
+    while let Some(parent) = ancestor.parent().map(|pp| pp.to_path_buf()) {
+        if parent.is_dir() {
+            return is_dir_writable(&parent);
+        }
+        if parent == ancestor {
+            break;
+        }
+        ancestor = parent;
+    }
+    false
+}
+
+fn is_dir_writable(path: &std::path::Path) -> bool {
+    let test_path = path.join(".mixr_write_test");
+    match std::fs::File::create(&test_path) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&test_path);
+            true
+        }
+        Err(_) => false,
     }
 }
 
@@ -675,6 +723,35 @@ pub fn dest_existing_prefix_len(value: &str) -> usize {
         ancestor = parent;
     }
     0
+}
+
+fn volumes_path() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        Some("/Volumes/".to_string())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(user) = std::env::var("USER") {
+            let media = format!("/media/{user}/");
+            if std::path::Path::new(&media).is_dir() {
+                return Some(media);
+            }
+            let run_media = format!("/run/media/{user}/");
+            if std::path::Path::new(&run_media).is_dir() {
+                return Some(run_media);
+            }
+        }
+        if std::path::Path::new("/mnt/").is_dir() {
+            Some("/mnt/".to_string())
+        } else {
+            None
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        None
+    }
 }
 
 fn resolve_path_value(raw: &str) -> String {
@@ -879,6 +956,18 @@ fn update_setup(
         KeyCode::Char('w') if ctrl && form.focused.is_text() => {
             form.delete_word_before_cursor();
             if form.focused.is_path() {
+                refresh_dropdown(form);
+            }
+            Effect::None
+        }
+        KeyCode::Char('d') if ctrl && form.focused.is_path() => {
+            if let Some(vp) = volumes_path() {
+                match form.focused {
+                    SetupField::Source => form.source = vp.clone(),
+                    SetupField::Destination => form.destination = vp.clone(),
+                    _ => {}
+                }
+                form.cursor = vp.chars().count();
                 refresh_dropdown(form);
             }
             Effect::None

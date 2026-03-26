@@ -316,7 +316,7 @@ fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
         Line::from(Span::styled(err.as_str(), Style::default().fg(Color::Red)))
     } else {
         Line::from(Span::styled(
-            "\u{2191}\u{2193}: navigate  Tab: complete  Enter: go  Ctrl+C: quit",
+            "\u{2191}\u{2193}: navigate  Tab: complete  ^D: drives  Enter: go  ^C: quit",
             Style::default().fg(Color::DarkGray),
         ))
     };
