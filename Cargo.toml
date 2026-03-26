@@ -10,6 +10,7 @@ crossterm = "0.28"
 walkdir = "2"
 fs4 = "0.13"
 rand = "0.9"
+sys-locale = "0.3.2"
 
 [dev-dependencies]
 tempfile = "3"

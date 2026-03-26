@@ -6,12 +6,13 @@ use std::thread;
 use crate::app::{update, Effect, FileStatus, Model, Msg, Phase};
 use crate::copier;
 use crate::filters::FilterSet;
+use crate::i18n::Locale;
 use crate::scanner;
 use crate::types::{format_duration, ByteSize, Config, Error};
 
 #[allow(clippy::too_many_lines, clippy::unnecessary_wraps)]
-pub fn run(config: &Config) -> Result<bool, Error> {
-    let mut model = Model::new_cli(config.clone());
+pub fn run(config: &Config, locale: &'static Locale) -> Result<bool, Error> {
+    let mut model = Model::new_cli(config.clone(), locale);
     let (tx, rx) = mpsc::channel::<Msg>();
     let mut stderr = io::stderr().lock();
 
@@ -43,7 +44,8 @@ pub fn run(config: &Config) -> Result<bool, Error> {
 
     let _ = write!(
         stderr,
-        "Scanning {}... ",
+        "{} {}... ",
+        locale.scanning,
         config.source.display()
     );
     let _ = stderr.flush();
@@ -60,7 +62,8 @@ pub fn run(config: &Config) -> Result<bool, Error> {
                 let total: u64 = files.iter().map(|f| f.size.as_u64()).sum();
                 let _ = writeln!(
                     stderr,
-                    "Copying {} files ({}) to {}",
+                    "{} {} ({}) -> {}",
+                    locale.cli_copying,
                     files.len(),
                     ByteSize(total),
                     config.destination.display(),
@@ -91,10 +94,13 @@ pub fn run(config: &Config) -> Result<bool, Error> {
             Phase::Scanning { state, .. } => {
                 let _ = write!(
                     stderr,
-                    "\rScanning {}... {} found, {} matched",
+                    "\r{} {}... {} {}, {} {}",
+                    locale.scanning,
                     config.source.display(),
                     state.files_found,
+                    locale.found,
                     state.files_matched,
+                    locale.matched,
                 );
                 let _ = stderr.flush();
             }
@@ -133,16 +139,19 @@ pub fn run(config: &Config) -> Result<bool, Error> {
                 };
                 let _ = writeln!(
                     stderr,
-                    "Done: {total_files} files, {} copied in {}, {speed}/s, {} errors",
+                    "{}: {} files, {} in {}, {speed}/s, {} {}",
+                    locale.cli_done,
+                    total_files,
                     ByteSize(*total_bytes),
                     format_duration(*elapsed),
                     errors.len(),
+                    locale.cli_errors,
                 );
                 had_errors = !errors.is_empty();
                 break;
             }
             Phase::FatalError(msg) => {
-                let _ = writeln!(stderr, "\nFatal error: {msg}");
+                let _ = writeln!(stderr, "\n{}: {msg}", locale.cli_fatal);
                 had_errors = true;
                 break;
             }

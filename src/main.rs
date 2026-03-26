@@ -2,6 +2,7 @@ mod app;
 mod cli;
 mod copier;
 mod filters;
+mod i18n;
 mod scanner;
 mod tui;
 mod types;
@@ -45,12 +46,13 @@ fn parse_byte_size(s: &str) -> Result<ByteSize, String> {
 }
 
 fn main() -> ExitCode {
+    let locale = i18n::detect();
     let args = Args::parse();
 
     match (args.source, args.destination) {
         (Some(source), Some(destination)) => {
             if !source.exists() {
-                eprintln!("Error: source not found: {}", source.display());
+                eprintln!("{}: {}", locale.err_source_not_found, source.display());
                 return ExitCode::FAILURE;
             }
 
@@ -67,7 +69,7 @@ fn main() -> ExitCode {
                 allowed_extensions,
             };
 
-            match cli::run(&config) {
+            match cli::run(&config, locale) {
                 Ok(true) => ExitCode::SUCCESS,
                 Ok(false) => ExitCode::FAILURE,
                 Err(e) => {
@@ -84,9 +86,9 @@ fn main() -> ExitCode {
             }
         },
         _ => {
-            eprintln!("Error: both SOURCE and DESTINATION are required in CLI mode");
-            eprintln!("Usage: mixr [OPTIONS] <SOURCE> <DESTINATION>");
-            eprintln!("Run without arguments for interactive TUI mode");
+            eprintln!("{}", locale.err_both_required);
+            eprintln!("{}", locale.err_usage);
+            eprintln!("{}", locale.err_run_tui);
             ExitCode::FAILURE
         }
     }

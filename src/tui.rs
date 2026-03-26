@@ -16,6 +16,7 @@ use crate::app::{
 };
 use crate::copier;
 use crate::filters::FilterSet;
+use crate::i18n::Locale;
 use crate::scanner;
 use crate::types::{format_duration, ByteSize, Config, Error};
 
@@ -148,23 +149,24 @@ fn spawn_copier(
 
 fn view(model: &Model, frame: &mut Frame) {
     let area = frame.area();
+    let locale = model.locale;
 
     match &model.phase {
-        Phase::Setup(form) => view_setup(form, frame, area),
-        Phase::Scanning { config, state } => view_scanning(config, state, model, frame, area),
-        Phase::Copying(cs) => view_copying(cs, frame, area),
+        Phase::Setup(form) => view_setup(form, locale, frame, area),
+        Phase::Scanning { config, state } => view_scanning(config, state, model, locale, frame, area),
+        Phase::Copying(cs) => view_copying(cs, locale, frame, area),
         Phase::Done {
             total_files,
             total_bytes,
             errors,
             elapsed,
-        } => view_done(*total_files, *total_bytes, errors, *elapsed, frame, area),
-        Phase::FatalError(msg) => view_error(msg, frame, area),
+        } => view_done(*total_files, *total_bytes, errors, *elapsed, locale, frame, area),
+        Phase::FatalError(msg) => view_error(msg, locale, frame, area),
     }
 }
 
 #[allow(clippy::too_many_lines)]
-fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
+fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) {
     let block = Block::bordered().title(" mixr ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -187,12 +189,12 @@ fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
 
     let label_width = 14_usize;
     let fields: &[(SetupField, &str, &str)] = &[
-        (SetupField::Source, "Source:", &form.source),
-        (SetupField::Destination, "Destination:", &form.destination),
-        (SetupField::Size, "Size:", &form.size),
-        (SetupField::MinSize, "Min size:", &form.min_size),
-        (SetupField::Extensions, "Extensions:", &form.extensions),
-        (SetupField::Exclude, "Exclude:", &form.exclude),
+        (SetupField::Source, locale.source, &form.source),
+        (SetupField::Destination, locale.destination, &form.destination),
+        (SetupField::Size, locale.size, &form.size),
+        (SetupField::MinSize, locale.min_size, &form.min_size),
+        (SetupField::Extensions, locale.extensions, &form.extensions),
+        (SetupField::Exclude, locale.exclude, &form.exclude),
     ];
 
     for (i, (field, label, value)) in fields.iter().enumerate() {
@@ -215,7 +217,7 @@ fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
         let dim = Style::default().fg(Color::DarkGray);
 
         if value.is_empty() && !focused {
-            spans.push(Span::styled(field.placeholder(), dim));
+            spans.push(Span::styled(field.placeholder(locale), dim));
         } else if focused {
             let chars: Vec<char> = value.chars().collect();
             let cursor_pos = form.cursor.min(chars.len());
@@ -241,7 +243,7 @@ fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
                     Style::default().bg(Color::White).fg(Color::Black),
                 ));
                 spans.push(Span::styled(
-                    format!(" {}", field.placeholder()),
+                    format!(" {}", field.placeholder(locale)),
                     dim,
                 ));
             } else {
@@ -325,9 +327,9 @@ fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
         Style::default()
     };
     let checkboxes = Line::from(vec![
-        Span::styled(format!("[{no_live_marker}] No live"), no_live_style),
+        Span::styled(format!("[{no_live_marker}] {}", locale.no_live), no_live_style),
         Span::raw("   "),
-        Span::styled(format!("[{keep_marker}] Keep names"), keep_style),
+        Span::styled(format!("[{keep_marker}] {}", locale.keep_names), keep_style),
     ]);
     if let Some(chunk) = chunks.get(7) {
         frame.render_widget(Paragraph::new(checkboxes), *chunk);
@@ -341,7 +343,7 @@ fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
     } else {
         Style::default().fg(Color::White)
     };
-    let start = Line::from(Span::styled(" [ Start ] ", start_style));
+    let start = Line::from(Span::styled(format!(" [ {} ] ", locale.start), start_style));
     if let Some(chunk) = chunks.get(9) {
         frame.render_widget(
             Paragraph::new(start).alignment(Alignment::Center),
@@ -353,7 +355,7 @@ fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
         Line::from(Span::styled(err.as_str(), Style::default().fg(Color::Red)))
     } else {
         Line::from(Span::styled(
-            "\u{2191}\u{2193}: navigate  Tab: complete  ^D: drives  Enter: go  ^C: quit",
+            locale.help_setup,
             Style::default().fg(Color::DarkGray),
         ))
     };
@@ -406,10 +408,11 @@ fn view_scanning(
     config: &Config,
     state: &ScanState,
     model: &Model,
+    locale: &Locale,
     frame: &mut Frame,
     area: Rect,
 ) {
-    let block = Block::bordered().title(" mixr - Scanning ");
+    let block = Block::bordered().title(format!(" mixr - {} ", locale.scanning));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -421,16 +424,18 @@ fn view_scanning(
     ])
     .areas::<4>(inner);
 
-    let scanning = Line::from(format!("Scanning {}...", config.source.display()));
+    let scanning = Line::from(format!("{} {}...", locale.scanning, config.source.display()));
     if let Some(chunk) = chunks.first() {
         frame.render_widget(Paragraph::new(scanning), *chunk);
     }
 
     let stats = Line::from(format!(
-        "{} {} found ({} matched)",
+        "{} {} {} ({} {})",
         model.spinner_char(),
         state.files_found,
+        locale.found,
         state.files_matched,
+        locale.matched,
     ));
     if let Some(chunk) = chunks.get(1) {
         frame.render_widget(Paragraph::new(stats), *chunk);
@@ -455,8 +460,8 @@ fn view_scanning(
 }
 
 #[allow(clippy::too_many_lines)]
-fn view_copying(cs: &CopyState, frame: &mut Frame, area: Rect) {
-    let block = Block::bordered().title(" mixr - Copying ");
+fn view_copying(cs: &CopyState, locale: &Locale, frame: &mut Frame, area: Rect) {
+    let block = Block::bordered().title(format!(" mixr - {} ", locale.copying));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -476,9 +481,9 @@ fn view_copying(cs: &CopyState, frame: &mut Frame, area: Rect) {
 
     let current_pct = format!("{:.0}%", cs.current_progress().clamp(0.0_f64, 1.0_f64) * 100.0_f64);
     let current_label = if let Some(cur) = cs.current() {
-        format!("Current: {} ({}) {current_pct}", cur.name, cur.size)
+        format!("{}: {} ({}) {current_pct}", locale.current, cur.name, cur.size)
     } else {
-        format!("Current: {current_pct}")
+        format!("{}: {current_pct}", locale.current)
     };
     let current_gauge = Gauge::default()
         .label(Span::styled(
@@ -498,7 +503,8 @@ fn view_copying(cs: &CopyState, frame: &mut Frame, area: Rect) {
         .count();
     let total_pct = format!("{:.0}%", cs.overall_progress().clamp(0.0_f64, 1.0_f64) * 100.0_f64);
     let total_label = format!(
-        "Total: {} / {} ({}/{}) {total_pct}",
+        "{}: {} / {} ({}/{}) {total_pct}",
+        locale.total,
         ByteSize(cs.copied_bytes),
         ByteSize(cs.total_bytes),
         done_count,
@@ -526,7 +532,7 @@ fn view_copying(cs: &CopyState, frame: &mut Frame, area: Rect) {
         .map_or_else(|| "\u{2014}".to_string(), |s| format_duration(Duration::from_secs_f64(s)));
 
     let status = Line::from(Span::styled(
-        format!("{speed_str}/s  Elapsed: {elapsed_str}  ETA: {eta_str}"),
+        format!("{speed_str}/s  {}: {elapsed_str}  {}: {eta_str}", locale.elapsed, locale.eta),
         Style::default().fg(Color::DarkGray),
     ));
     if let Some(chunk) = chunks.get(4) {
@@ -534,7 +540,7 @@ fn view_copying(cs: &CopyState, frame: &mut Frame, area: Rect) {
     }
 
     let help = Line::from(Span::styled(
-        "Ctrl+C to stop",
+        locale.ctrl_c_stop,
         Style::default().fg(Color::DarkGray),
     ));
     if let Some(chunk) = chunks.get(5) {
@@ -607,33 +613,35 @@ fn view_done(
     total_bytes: u64,
     errors: &[String],
     elapsed: Duration,
+    locale: &Locale,
     frame: &mut Frame,
     area: Rect,
 ) {
-    let block = Block::bordered().title(" mixr - Done ");
+    let block = Block::bordered().title(format!(" mixr - {} ", locale.done));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     let mut lines = vec![
         Line::from(Span::styled(
-            "Done!",
+            locale.done,
             Style::default()
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(format!(
-            "Copied {} files ({})",
+            "{} {} ({})",
+            locale.copied_files,
             total_files,
             ByteSize(total_bytes),
         )),
-        Line::from(format!("Time: {}", format_duration(elapsed))),
+        Line::from(format!("{}: {}", locale.time, format_duration(elapsed))),
     ];
 
     if !errors.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            format!("{} errors:", errors.len()),
+            format!("{} {}:", errors.len(), locale.errors),
             Style::default().fg(Color::Red),
         )));
         for err in errors.iter().take(10_usize) {
@@ -646,21 +654,21 @@ fn view_done(
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Press q to quit",
+        locale.press_q,
         Style::default().fg(Color::DarkGray),
     )));
 
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-fn view_error(msg: &str, frame: &mut Frame, area: Rect) {
-    let block = Block::bordered().title(" mixr - Error ");
+fn view_error(msg: &str, locale: &Locale, frame: &mut Frame, area: Rect) {
+    let block = Block::bordered().title(format!(" mixr - {} ", locale.fatal_error));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     let lines = vec![
         Line::from(Span::styled(
-            "Fatal error!",
+            locale.fatal_error,
             Style::default()
                 .fg(Color::Red)
                 .add_modifier(Modifier::BOLD),
@@ -669,7 +677,7 @@ fn view_error(msg: &str, frame: &mut Frame, area: Rect) {
         Line::from(msg.to_string()),
         Line::from(""),
         Line::from(Span::styled(
-            "Press q to quit",
+            locale.press_q,
             Style::default().fg(Color::DarkGray),
         )),
     ];

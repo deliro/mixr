@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::copier::CopyMsg;
+use crate::i18n::{self, Locale};
 use crate::scanner::ScanMsg;
 use crate::types::{ByteSize, Config, FileEntry};
 
@@ -76,14 +77,14 @@ impl SetupField {
         matches!(self, Self::Extensions | Self::Exclude)
     }
 
-    pub fn placeholder(self) -> &'static str {
+    pub fn placeholder(self, locale: &Locale) -> &'static str {
         match self {
-            Self::Source => "~/Music",
-            Self::Destination => "Ctrl+D for drives",
-            Self::Size => "auto (free space)",
-            Self::MinSize => "e.g. 1M",
-            Self::Extensions => "mp3, flac, ogg, ...",
-            Self::Exclude => "e.g. wav, wma",
+            Self::Source => locale.ph_source,
+            Self::Destination => locale.ph_destination,
+            Self::Size => locale.ph_size,
+            Self::MinSize => locale.ph_min_size,
+            Self::Extensions => locale.ph_extensions,
+            Self::Exclude => locale.ph_exclude,
             _ => "",
         }
     }
@@ -397,6 +398,7 @@ pub struct Model {
     pub terminal_size: (u16, u16),
     pub should_quit: bool,
     pub shutdown: Arc<AtomicBool>,
+    pub locale: &'static Locale,
 }
 
 pub enum Msg {
@@ -426,10 +428,11 @@ impl Model {
             terminal_size: (80, 24),
             should_quit: false,
             shutdown: Arc::new(AtomicBool::new(false)),
+            locale: i18n::detect(),
         }
     }
 
-    pub fn new_cli(config: Config) -> Self {
+    pub fn new_cli(config: Config, locale: &'static Locale) -> Self {
         Self {
             phase: Phase::Scanning {
                 config,
@@ -443,6 +446,7 @@ impl Model {
             terminal_size: (80, 24),
             should_quit: false,
             shutdown: Arc::new(AtomicBool::new(false)),
+            locale,
         }
     }
 
@@ -480,9 +484,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                 return Effect::Quit;
             }
 
+            let locale = model.locale;
             match &mut model.phase {
                 Phase::Setup(form) => {
-                    let effect = update_setup(form, key);
+                    let effect = update_setup(form, key, locale);
                     if let Effect::StartScan(ref config) = effect {
                         model.phase = Phase::Scanning {
                             config: config.clone(),
@@ -949,6 +954,7 @@ fn apply_autocomplete(form: &mut SetupForm) {
 fn update_setup(
     form: &mut SetupForm,
     key: crossterm::event::KeyEvent,
+    locale: &'static Locale,
 ) -> Effect {
     use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -1039,7 +1045,7 @@ fn update_setup(
         }
         KeyCode::Enter => {
             if form.focused == SetupField::Start {
-                validate_and_start(form)
+                validate_and_start(form, locale)
             } else {
                 form.dropdown.visible = false;
                 form.focused = form.focused.next();
@@ -1073,21 +1079,21 @@ fn update_setup(
     }
 }
 
-fn validate_and_start(form: &mut SetupForm) -> Effect {
+fn validate_and_start(form: &mut SetupForm, locale: &Locale) -> Effect {
     if form.source.is_empty() {
-        form.error = Some("Source path is required".to_string());
+        form.error = Some(locale.err_source_required.to_string());
         form.focused = SetupField::Source;
         return Effect::None;
     }
     if form.destination.is_empty() {
-        form.error = Some("Destination path is required".to_string());
+        form.error = Some(locale.err_dest_required.to_string());
         form.focused = SetupField::Destination;
         return Effect::None;
     }
 
     let source = PathBuf::from(resolve_path_value(&form.source));
     if !source.is_dir() {
-        form.error = Some(format!("Source is not a directory: {}", source.display()));
+        form.error = Some(format!("{}: {}", locale.err_source_not_dir, source.display()));
         form.focused = SetupField::Source;
         return Effect::None;
     }
@@ -1098,7 +1104,7 @@ fn validate_and_start(form: &mut SetupForm) -> Effect {
         match ByteSize::parse(&form.size) {
             Ok(s) => Some(s),
             Err(e) => {
-                form.error = Some(format!("Invalid size: {e}"));
+                form.error = Some(format!("{}: {e}", locale.err_invalid_size));
                 form.focused = SetupField::Size;
                 return Effect::None;
             }
@@ -1111,7 +1117,7 @@ fn validate_and_start(form: &mut SetupForm) -> Effect {
         match ByteSize::parse(&form.min_size) {
             Ok(s) => Some(s),
             Err(e) => {
-                form.error = Some(format!("Invalid min size: {e}"));
+                form.error = Some(format!("{}: {e}", locale.err_invalid_min_size));
                 form.focused = SetupField::MinSize;
                 return Effect::None;
             }
@@ -1256,7 +1262,7 @@ mod tests {
             keep_names: false,
             allowed_extensions: vec![],
         };
-        let mut model = Model::new_cli(config);
+        let mut model = Model::new_cli(config, &i18n::EN);
 
         update(
             &mut model,
@@ -1285,7 +1291,7 @@ mod tests {
             keep_names: false,
             allowed_extensions: vec![],
         };
-        let mut model = Model::new_cli(config);
+        let mut model = Model::new_cli(config, &i18n::EN);
 
         let files = vec![FileEntry {
             path: PathBuf::from("/src/a.mp3"),
@@ -1308,7 +1314,7 @@ mod tests {
             keep_names: false,
             allowed_extensions: vec![],
         };
-        let mut model = Model::new_cli(config);
+        let mut model = Model::new_cli(config, &i18n::EN);
         let files = vec![FileEntry {
             path: PathBuf::from("/src/a.mp3"),
             size: ByteSize(1000),
@@ -1347,7 +1353,7 @@ mod tests {
             keep_names: false,
             allowed_extensions: vec![],
         };
-        let mut model = Model::new_cli(config);
+        let mut model = Model::new_cli(config, &i18n::EN);
         let files = vec![FileEntry {
             path: PathBuf::from("/src/a.mp3"),
             size: ByteSize(1000),
@@ -1369,7 +1375,7 @@ mod tests {
             keep_names: false,
             allowed_extensions: vec![],
         };
-        let mut model = Model::new_cli(config);
+        let mut model = Model::new_cli(config, &i18n::EN);
         let files = vec![FileEntry {
             path: PathBuf::from("/src/a.mp3"),
             size: ByteSize(1000),
