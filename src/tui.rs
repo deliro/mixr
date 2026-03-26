@@ -12,7 +12,7 @@ use ratatui::Frame;
 
 use crate::app::{
     dest_existing_prefix_len, field_is_invalid, format_ext_list, update, CopyState, Effect,
-    FileStatus, Model, Msg, Phase, ScanState, SetupField, SetupForm,
+    FileStatus, Model, Msg, Phase, ScanState, SetupField, SetupForm, MAX_HISTORY, MAX_UPCOMING,
 };
 use crate::copier;
 use crate::filters::FilterSet;
@@ -436,44 +436,55 @@ fn view_copying(cs: &CopyState, frame: &mut Frame, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    let total_file_rows = (MAX_UPCOMING + 1 + MAX_HISTORY) as u16;
     let chunks = Layout::vertical([
+        Constraint::Length(total_file_rows),
         Constraint::Min(0),
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
     ])
-    .areas::<5>(inner);
+    .areas::<6>(inner);
 
-    let file_area = chunks[0];
-    render_file_list(cs, frame, file_area);
+    render_file_list(cs, frame, chunks[0]);
 
+    let current_pct = format!("{:.0}%", cs.current_progress().clamp(0.0, 1.0) * 100.0);
     let current_label = if let Some(cur) = cs.current() {
-        format!("Current: {} ({})", cur.name, cur.size)
+        format!("Current: {} ({}) {current_pct}", cur.name, cur.size)
     } else {
-        "Current:".to_string()
+        format!("Current: {current_pct}")
     };
     let current_gauge = Gauge::default()
-        .label(Span::raw(current_label))
+        .label(Span::styled(
+            current_label,
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        ))
         .ratio(cs.current_progress().clamp(0.0, 1.0))
-        .gauge_style(Style::default().fg(Color::Cyan));
-    frame.render_widget(current_gauge, chunks[1]);
+        .gauge_style(Style::default().fg(Color::Rgb(0, 150, 180)).bg(Color::Rgb(40, 40, 40)));
+    frame.render_widget(current_gauge, chunks[2]);
 
+    let done_count = cs
+        .files
+        .iter()
+        .filter(|f| f.status == FileStatus::Done)
+        .count();
+    let total_pct = format!("{:.0}%", cs.overall_progress().clamp(0.0, 1.0) * 100.0);
     let total_label = format!(
-        "Total: {} / {} ({}/{})",
+        "Total: {} / {} ({}/{}) {total_pct}",
         ByteSize(cs.copied_bytes),
         ByteSize(cs.total_bytes),
-        cs.files
-            .iter()
-            .filter(|f| f.status == FileStatus::Done)
-            .count(),
+        done_count,
         cs.total_files,
     );
     let total_gauge = Gauge::default()
-        .label(Span::raw(total_label))
+        .label(Span::styled(
+            total_label,
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        ))
         .ratio(cs.overall_progress().clamp(0.0, 1.0))
-        .gauge_style(Style::default().fg(Color::Green));
-    frame.render_widget(total_gauge, chunks[2]);
+        .gauge_style(Style::default().fg(Color::Rgb(0, 150, 0)).bg(Color::Rgb(40, 40, 40)));
+    frame.render_widget(total_gauge, chunks[3]);
 
     let speed = cs.speed();
     let speed_str = ByteSize(speed as u64);
@@ -488,44 +499,69 @@ fn view_copying(cs: &CopyState, frame: &mut Frame, area: Rect) {
         format!("{speed_str}/s  Elapsed: {elapsed_str}  ETA: {eta_str}"),
         Style::default().fg(Color::DarkGray),
     ));
-    frame.render_widget(Paragraph::new(status), chunks[3]);
+    frame.render_widget(Paragraph::new(status), chunks[4]);
 
     let help = Line::from(Span::styled(
         "Ctrl+C to stop",
         Style::default().fg(Color::DarkGray),
     ));
-    frame.render_widget(Paragraph::new(help), chunks[4]);
+    frame.render_widget(Paragraph::new(help), chunks[5]);
 }
+
+const HISTORY_GREENS: &[Color] = &[
+    Color::Rgb(0, 220, 0),
+    Color::Rgb(0, 180, 0),
+    Color::Rgb(0, 140, 0),
+    Color::Rgb(0, 100, 0),
+];
 
 fn render_file_list(cs: &CopyState, frame: &mut Frame, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
-    for item in cs.upcoming() {
-        let line = Line::from(Span::styled(
-            format!("  {}", item.name),
-            Style::default().fg(Color::DarkGray),
-        ));
-        lines.push(line);
+    let upcoming: Vec<_> = cs.upcoming().collect();
+    for row in (0..MAX_UPCOMING).rev() {
+        if let Some(item) = upcoming.get(row) {
+            lines.push(Line::from(Span::styled(
+                format!("  {}", item.name),
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            lines.push(Line::from(""));
+        }
     }
 
     if let Some(cur) = cs.current() {
-        let line = Line::from(Span::styled(
+        lines.push(Line::from(Span::styled(
             format!("> {} ({})", cur.name, cur.size),
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
-        ));
-        lines.push(line);
+        )));
+    } else {
+        lines.push(Line::from(""));
     }
 
-    for item in cs.history() {
-        let (prefix, style) = match item.status {
-            FileStatus::Done => ("  ", Style::default().fg(Color::Green)),
-            FileStatus::Failed => ("  ", Style::default().fg(Color::Red)),
-            _ => ("  ", Style::default()),
-        };
-        let line = Line::from(Span::styled(format!("{prefix}{}", item.name), style));
-        lines.push(line);
+    let history: Vec<_> = cs.history().collect();
+    for row in 0..MAX_HISTORY {
+        if let Some(item) = history.get(row) {
+            let style = match item.status {
+                FileStatus::Done => {
+                    let color = HISTORY_GREENS
+                        .get(row)
+                        .copied()
+                        .unwrap_or(Color::Rgb(0, 80, 0));
+                    Style::default().fg(color)
+                }
+                FileStatus::Failed => Style::default().fg(Color::Red),
+                _ => Style::default(),
+            };
+            lines.push(Line::from(Span::styled(
+                format!("  {}", item.name),
+                style,
+            )));
+        } else {
+            lines.push(Line::from(""));
+        }
     }
 
     let paragraph = Paragraph::new(lines);

@@ -7,8 +7,8 @@ use crate::copier::CopyMsg;
 use crate::scanner::ScanMsg;
 use crate::types::{ByteSize, Config, FileEntry};
 
-const MAX_UPCOMING: usize = 3;
-const MAX_HISTORY: usize = 4;
+pub const MAX_UPCOMING: usize = 3;
+pub const MAX_HISTORY: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetupField {
