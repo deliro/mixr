@@ -2,7 +2,6 @@ use std::io::{self, Write};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
-use std::time::Instant;
 
 use crate::app::{update, Effect, FileStatus, Model, Msg, Phase};
 use crate::copier;
@@ -48,8 +47,8 @@ pub fn run(config: Config) -> Result<bool, Error> {
     );
     let _ = stderr.flush();
 
-    let _started = Instant::now();
     let mut had_errors = false;
+    let mut last_printed_index: Option<usize> = None;
 
     loop {
         let msg = match rx.recv() {
@@ -58,6 +57,40 @@ pub fn run(config: Config) -> Result<bool, Error> {
         };
 
         let effect = update(&mut model, msg);
+
+        match effect {
+            Effect::StartScan(_) => {}
+            Effect::StartCopy { files, config } => {
+                let _ = writeln!(stderr);
+                let total: u64 = files.iter().map(|f| f.size.as_u64()).sum();
+                let _ = writeln!(
+                    stderr,
+                    "Copying {} files ({}) to {}",
+                    files.len(),
+                    ByteSize(total),
+                    config.destination.display(),
+                );
+                let _ = writeln!(stderr);
+
+                let shutdown = Arc::clone(&model.shutdown);
+                let destination = config.destination.clone();
+                let keep_names = config.keep_names;
+                let copy_tx = tx.clone();
+                thread::spawn(move || {
+                    let (stx, srx) = mpsc::channel();
+                    thread::spawn(move || {
+                        for msg in srx {
+                            if copy_tx.send(Msg::Copy(msg)).is_err() {
+                                break;
+                            }
+                        }
+                    });
+                    copier::copy_files(&files, &destination, keep_names, &stx, &shutdown);
+                });
+            }
+            Effect::Quit => break,
+            Effect::None => {}
+        }
 
         match &model.phase {
             Phase::Scanning { state, .. } => {
@@ -72,21 +105,15 @@ pub fn run(config: Config) -> Result<bool, Error> {
             }
             Phase::Copying(cs) => {
                 if let Some(cur) = cs.current() {
-                    if cs.current_file_copied == 0 {
-                        let done_count = cs
-                            .files
-                            .iter()
-                            .filter(|f| {
-                                matches!(
-                                    f.status,
-                                    FileStatus::Done | FileStatus::Failed
-                                )
-                            })
-                            .count();
+                    let idx = cs.current_index;
+                    if last_printed_index != Some(idx)
+                        && matches!(cur.status, FileStatus::Copying)
+                    {
+                        last_printed_index = Some(idx);
                         let _ = writeln!(
                             stderr,
                             "[{:>width$}/{}]  {} <- {} ({})",
-                            done_count + 1,
+                            idx + 1,
                             cs.total_files,
                             cur.name,
                             cur.original_path.display(),
@@ -124,40 +151,6 @@ pub fn run(config: Config) -> Result<bool, Error> {
                 break;
             }
             _ => {}
-        }
-
-        match effect {
-            Effect::StartScan(_) => {}
-            Effect::StartCopy { files, config } => {
-                let _ = writeln!(stderr);
-                let total: u64 = files.iter().map(|f| f.size.as_u64()).sum();
-                let _ = writeln!(
-                    stderr,
-                    "Copying {} files ({}) to {}",
-                    files.len(),
-                    ByteSize(total),
-                    config.destination.display(),
-                );
-                let _ = writeln!(stderr);
-
-                let shutdown = Arc::clone(&model.shutdown);
-                let destination = config.destination.clone();
-                let keep_names = config.keep_names;
-                let copy_tx = tx.clone();
-                thread::spawn(move || {
-                    let (stx, srx) = mpsc::channel();
-                    thread::spawn(move || {
-                        for msg in srx {
-                            if copy_tx.send(Msg::Copy(msg)).is_err() {
-                                break;
-                            }
-                        }
-                    });
-                    copier::copy_files(&files, &destination, keep_names, &stx, &shutdown);
-                });
-            }
-            Effect::Quit => break,
-            Effect::None => {}
         }
     }
 
