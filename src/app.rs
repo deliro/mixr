@@ -174,21 +174,19 @@ impl SetupForm {
         if self.cursor == 0 {
             return;
         }
-        let val = match self.focused_value() {
-            Some(v) => v.to_string(),
-            None => return,
-        };
-        let byte_end = char_to_byte_idx(&val, self.cursor);
-        let before = &val[..byte_end];
-        let new_end = before
-            .rfind('/')
-            .map(|i| i + 1)
+        let new_cursor = self.word_boundary_left();
+        let byte_start = self
+            .focused_value()
+            .map(|v| char_to_byte_idx(v, new_cursor))
             .unwrap_or(0);
-        let chars_removed = before[new_end..].chars().count();
+        let byte_end = self
+            .focused_value()
+            .map(|v| char_to_byte_idx(v, self.cursor))
+            .unwrap_or(0);
         if let Some(v) = self.focused_value_mut() {
-            v.drain(new_end..byte_end);
+            v.drain(byte_start..byte_end);
         }
-        self.cursor -= chars_removed;
+        self.cursor = new_cursor;
     }
 
     fn word_boundary_left(&self) -> usize {
@@ -196,15 +194,18 @@ impl SetupForm {
             Some(v) => v,
             None => return 0,
         };
+        let chars: Vec<char> = val.chars().collect();
         if self.cursor == 0 {
             return 0;
         }
-        let byte_pos = char_to_byte_idx(val, self.cursor);
-        let before = &val[..byte_pos];
-        before
-            .rfind('/')
-            .map(|i| val[..i].chars().count())
-            .unwrap_or(0)
+        let mut pos = self.cursor;
+        while pos > 0 && is_word_separator(chars[pos - 1]) {
+            pos -= 1;
+        }
+        while pos > 0 && !is_word_separator(chars[pos - 1]) {
+            pos -= 1;
+        }
+        pos
     }
 
     fn word_boundary_right(&self) -> usize {
@@ -212,17 +213,24 @@ impl SetupForm {
             Some(v) => v,
             None => return 0,
         };
-        let len = val.chars().count();
+        let chars: Vec<char> = val.chars().collect();
+        let len = chars.len();
         if self.cursor >= len {
             return len;
         }
-        let byte_pos = char_to_byte_idx(val, self.cursor);
-        let after = &val[byte_pos..];
-        match after[1..].find('/') {
-            Some(i) => self.cursor + 1 + after[1..][..i].chars().count() + 1,
-            None => len,
+        let mut pos = self.cursor;
+        while pos < len && !is_word_separator(chars[pos]) {
+            pos += 1;
         }
+        while pos < len && is_word_separator(chars[pos]) {
+            pos += 1;
+        }
+        pos
     }
+}
+
+fn is_word_separator(c: char) -> bool {
+    c == '/' || c == ' ' || c == '.' || c == '-' || c == '_'
 }
 
 fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
@@ -230,6 +238,22 @@ fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
         .nth(char_idx)
         .map(|(i, _)| i)
         .unwrap_or(s.len())
+}
+
+fn expand_tilde(s: &str) -> Option<String> {
+    if !s.starts_with('~') {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        let home = std::env::var("HOME").ok()?;
+        Some(s.replacen('~', &home, 1))
+    }
+    #[cfg(windows)]
+    {
+        let home = std::env::var("USERPROFILE").ok()?;
+        Some(s.replacen('~', &home, 1))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -612,6 +636,10 @@ fn handle_copy(model: &mut Model, copy_msg: CopyMsg) -> Effect {
     }
 }
 
+pub fn expand_path(value: &str) -> String {
+    expand_tilde(value).unwrap_or_else(|| value.to_string())
+}
+
 pub fn field_is_invalid(field: SetupField, value: &str) -> bool {
     if value.is_empty() {
         return false;
@@ -619,7 +647,8 @@ pub fn field_is_invalid(field: SetupField, value: &str) -> bool {
     match field {
         SetupField::Size | SetupField::MinSize => ByteSize::parse(value).is_err(),
         SetupField::Source | SetupField::Destination => {
-            let path = std::path::Path::new(value);
+            let expanded = expand_path(value);
+            let path = std::path::Path::new(&expanded);
             !path.is_dir()
         }
         _ => false,
@@ -632,14 +661,16 @@ fn refresh_dropdown(form: &mut SetupForm) {
         return;
     }
 
-    let value = match form.focused {
-        SetupField::Source => &form.source,
-        SetupField::Destination => &form.destination,
+    let raw_value = match form.focused {
+        SetupField::Source => form.source.clone(),
+        SetupField::Destination => form.destination.clone(),
         _ => {
             form.dropdown.visible = false;
             return;
         }
     };
+
+    let value = expand_path(&raw_value);
 
     let (parent, prefix) = if value.ends_with('/') || value.ends_with(std::path::MAIN_SEPARATOR) {
         (value.as_str(), "")
@@ -650,8 +681,8 @@ fn refresh_dropdown(form: &mut SetupForm) {
             path.file_name().and_then(|n| n.to_str()),
         ) {
             (Some(parent), Some(name)) => {
-                let parent = if parent.is_empty() { "/" } else { parent };
-                (parent, name)
+                let p = if parent.is_empty() { "/" } else { parent };
+                (p, name)
             }
             _ => {
                 form.dropdown = Dropdown::default();
@@ -868,7 +899,7 @@ fn validate_and_start(form: &mut SetupForm) -> Effect {
         return Effect::None;
     }
 
-    let source = PathBuf::from(&form.source);
+    let source = PathBuf::from(expand_path(&form.source));
     if !source.is_dir() {
         form.error = Some(format!("Source is not a directory: {}", source.display()));
         form.focused = SetupField::Source;
@@ -917,7 +948,7 @@ fn validate_and_start(form: &mut SetupForm) -> Effect {
 
     let config = Config {
         source,
-        destination: PathBuf::from(&form.destination),
+        destination: PathBuf::from(expand_path(&form.destination)),
         max_size,
         min_file_size,
         no_live: form.no_live,
