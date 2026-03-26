@@ -26,7 +26,7 @@ pub fn scan(
 ) {
     let mut entries: Vec<FileEntry> = Vec::new();
 
-    for result in WalkDir::new(source).into_iter() {
+    for result in WalkDir::new(source) {
         if shutdown.load(Ordering::Relaxed) {
             return;
         }
@@ -48,16 +48,14 @@ pub fn scan(
         }
 
         let path = entry.path().to_path_buf();
-        let size = match entry.metadata() {
-            Ok(m) => m.len(),
-            Err(_) => {
-                let _ = tx.send(ScanMsg::FileFound {
-                    path,
-                    matched: false,
-                });
-                continue;
-            }
+        let Ok(meta) = entry.metadata() else {
+            let _ = tx.send(ScanMsg::FileFound {
+                path,
+                matched: false,
+            });
+            continue;
         };
+        let size = meta.len();
 
         let matched = filters.matches(&path, size);
         let _ = tx.send(ScanMsg::FileFound {
@@ -81,17 +79,17 @@ pub fn scan(
 fn pack_into_budget(files: Vec<FileEntry>, budget: u64) -> Vec<FileEntry> {
     let mut selected = Vec::new();
     let mut remaining = budget;
-    let mut consecutive_skips = 0;
-    let max_skips = 10;
+    let mut consecutive_skips = 0_u32;
+    let max_skips = 10_u32;
 
     for file in files {
         let size = file.size.as_u64();
         if size <= remaining {
-            remaining -= size;
+            remaining = remaining.saturating_sub(size);
             selected.push(file);
-            consecutive_skips = 0;
+            consecutive_skips = 0_u32;
         } else {
-            consecutive_skips += 1;
+            consecutive_skips = consecutive_skips.saturating_add(1);
             if consecutive_skips >= max_skips {
                 break;
             }
@@ -116,12 +114,12 @@ mod tests {
         fs::create_dir_all(&artist2).unwrap();
         fs::create_dir_all(&live_dir).unwrap();
 
-        fs::write(artist1.join("track1.mp3"), vec![0u8; 5000]).unwrap();
-        fs::write(artist1.join("track2.flac"), vec![0u8; 8000]).unwrap();
-        fs::write(artist2.join("song.mp3"), vec![0u8; 3000]).unwrap();
-        fs::write(artist2.join("cover.jpg"), vec![0u8; 1000]).unwrap();
-        fs::write(artist2.join("tiny.mp3"), vec![0u8; 100]).unwrap();
-        fs::write(live_dir.join("concert.mp3"), vec![0u8; 6000]).unwrap();
+        fs::write(artist1.join("track1.mp3"), vec![0_u8; 5000]).unwrap();
+        fs::write(artist1.join("track2.flac"), vec![0_u8; 8000]).unwrap();
+        fs::write(artist2.join("song.mp3"), vec![0_u8; 3000]).unwrap();
+        fs::write(artist2.join("cover.jpg"), vec![0_u8; 1000]).unwrap();
+        fs::write(artist2.join("tiny.mp3"), vec![0_u8; 100]).unwrap();
+        fs::write(live_dir.join("concert.mp3"), vec![0_u8; 6000]).unwrap();
     }
 
     #[test]

@@ -129,7 +129,7 @@ impl Default for SetupForm {
             focused: SetupField::Source,
             error: None,
             dropdown: Dropdown::default(),
-            cursor: 0,
+            cursor: 0_usize,
         }
     }
 }
@@ -160,7 +160,7 @@ impl SetupForm {
     }
 
     pub fn sync_cursor(&mut self) {
-        let len = self.focused_value().map(|v| v.chars().count()).unwrap_or(0);
+        let len = self.focused_value().map_or(0_usize, |v| v.chars().count());
         self.cursor = len;
     }
 
@@ -170,35 +170,33 @@ impl SetupForm {
             let byte_idx = char_to_byte_idx(val, cursor);
             val.insert(byte_idx, c);
         }
-        self.cursor = cursor + 1;
+        self.cursor = cursor.saturating_add(1);
     }
 
     fn delete_char_before_cursor(&mut self) {
-        if self.cursor == 0 {
+        if self.cursor == 0_usize {
             return;
         }
         let cursor = self.cursor;
         if let Some(val) = self.focused_value_mut() {
             let byte_idx = char_to_byte_idx(val, cursor);
-            let prev = char_to_byte_idx(val, cursor - 1);
+            let prev = char_to_byte_idx(val, cursor.saturating_sub(1));
             val.drain(prev..byte_idx);
         }
-        self.cursor = cursor - 1;
+        self.cursor = cursor.saturating_sub(1);
     }
 
     fn delete_word_before_cursor(&mut self) {
-        if self.cursor == 0 {
+        if self.cursor == 0_usize {
             return;
         }
         let new_cursor = self.word_boundary_left();
         let byte_start = self
             .focused_value()
-            .map(|v| char_to_byte_idx(v, new_cursor))
-            .unwrap_or(0);
+            .map_or(0_usize, |v| char_to_byte_idx(v, new_cursor));
         let byte_end = self
             .focused_value()
-            .map(|v| char_to_byte_idx(v, self.cursor))
-            .unwrap_or(0);
+            .map_or(0_usize, |v| char_to_byte_idx(v, self.cursor));
         if let Some(v) = self.focused_value_mut() {
             v.drain(byte_start..byte_end);
         }
@@ -206,40 +204,46 @@ impl SetupForm {
     }
 
     fn word_boundary_left(&self) -> usize {
-        let val = match self.focused_value() {
-            Some(v) => v,
-            None => return 0,
-        };
+        let Some(val) = self.focused_value() else { return 0_usize };
         let chars: Vec<char> = val.chars().collect();
-        if self.cursor == 0 {
-            return 0;
+        if self.cursor == 0_usize {
+            return 0_usize;
         }
         let mut pos = self.cursor;
-        while pos > 0 && is_word_separator(chars[pos - 1]) {
-            pos -= 1;
+        while pos > 0_usize {
+            match chars.get(pos.saturating_sub(1)) {
+                Some(&c) if is_word_separator(c) => pos = pos.saturating_sub(1),
+                _ => break,
+            }
         }
-        while pos > 0 && !is_word_separator(chars[pos - 1]) {
-            pos -= 1;
+        while pos > 0_usize {
+            match chars.get(pos.saturating_sub(1)) {
+                Some(&c) if !is_word_separator(c) => pos = pos.saturating_sub(1),
+                _ => break,
+            }
         }
         pos
     }
 
     fn word_boundary_right(&self) -> usize {
-        let val = match self.focused_value() {
-            Some(v) => v,
-            None => return 0,
-        };
+        let Some(val) = self.focused_value() else { return 0_usize };
         let chars: Vec<char> = val.chars().collect();
         let len = chars.len();
         if self.cursor >= len {
             return len;
         }
         let mut pos = self.cursor;
-        while pos < len && !is_word_separator(chars[pos]) {
-            pos += 1;
+        while pos < len {
+            match chars.get(pos) {
+                Some(&c) if !is_word_separator(c) => pos = pos.saturating_add(1),
+                _ => break,
+            }
         }
-        while pos < len && is_word_separator(chars[pos]) {
-            pos += 1;
+        while pos < len {
+            match chars.get(pos) {
+                Some(&c) if is_word_separator(c) => pos = pos.saturating_add(1),
+                _ => break,
+            }
         }
         pos
     }
@@ -252,8 +256,7 @@ fn is_word_separator(c: char) -> bool {
 fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
     s.char_indices()
         .nth(char_idx)
-        .map(|(i, _)| i)
-        .unwrap_or(s.len())
+        .map_or(s.len(), |(i, _)| i)
 }
 
 fn expand_tilde(s: &str) -> Option<String> {
@@ -313,55 +316,59 @@ pub struct CopyState {
 }
 
 impl CopyState {
+    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
     pub fn speed(&self) -> f64 {
         let window = std::time::Duration::from_secs(3);
         let now = Instant::now();
-        let cutoff = now - window;
+        let cutoff = now.checked_sub(window).unwrap_or(now);
         let total: u64 = self
             .speed_bytes
             .iter()
             .filter(|(t, _)| *t >= cutoff)
             .map(|(_, b)| b)
             .sum();
-        if total == 0 {
-            return 0.0;
+        if total == 0_u64 {
+            return 0.0_f64;
         }
         total as f64 / window.as_secs_f64()
     }
 
     pub fn upcoming(&self) -> impl Iterator<Item = &FileItem> {
-        let start = self.current_index + 1;
-        let end = (start + MAX_UPCOMING).min(self.files.len());
-        self.files[start..end].iter().rev()
+        let start = self.current_index.saturating_add(1);
+        let end = (start.saturating_add(MAX_UPCOMING)).min(self.files.len());
+        self.files.get(start..end).unwrap_or(&[]).iter().rev()
     }
 
     pub fn history(&self) -> impl Iterator<Item = &FileItem> {
         let end = self.current_index;
         let start = end.saturating_sub(MAX_HISTORY);
-        self.files[start..end].iter().rev()
+        self.files.get(start..end).unwrap_or(&[]).iter().rev()
     }
 
     pub fn current(&self) -> Option<&FileItem> {
         self.files.get(self.current_index)
     }
 
+    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
     pub fn overall_progress(&self) -> f64 {
-        if self.total_bytes == 0 {
-            return 0.0;
+        if self.total_bytes == 0_u64 {
+            return 0.0_f64;
         }
         self.copied_bytes as f64 / self.total_bytes as f64
     }
 
+    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
     pub fn current_progress(&self) -> f64 {
-        if self.current_file_size == 0 {
-            return 0.0;
+        if self.current_file_size == 0_u64 {
+            return 0.0_f64;
         }
         self.current_file_copied as f64 / self.current_file_size as f64
     }
 
+    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
     pub fn eta_secs(&self) -> Option<f64> {
         let speed = self.speed();
-        if speed <= 0.0 {
+        if speed <= 0.0_f64 {
             return None;
         }
         let remaining = self.total_bytes.saturating_sub(self.copied_bytes);
@@ -410,7 +417,7 @@ pub enum Effect {
     Quit,
 }
 
-const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const SPINNER_CHARS: &[char] = &['\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}', '\u{2827}', '\u{2807}', '\u{280F}'];
 
 impl Model {
     pub fn new_tui() -> Self {
@@ -427,10 +434,10 @@ impl Model {
             phase: Phase::Scanning {
                 config,
                 state: ScanState {
-                    files_found: 0,
-                    files_matched: 0,
+                    files_found: 0_usize,
+                    files_matched: 0_usize,
                     last_path: None,
-                    spinner_tick: 0,
+                    spinner_tick: 0_usize,
                 },
             },
             terminal_size: (80, 24),
@@ -441,13 +448,16 @@ impl Model {
 
     pub fn spinner_char(&self) -> char {
         if let Phase::Scanning { state, .. } = &self.phase {
-            SPINNER_CHARS[state.spinner_tick % SPINNER_CHARS.len()]
+            let len = SPINNER_CHARS.len();
+            let idx = if len == 0_usize { 0_usize } else { state.spinner_tick.checked_rem(len).unwrap_or(0_usize) };
+            SPINNER_CHARS.get(idx).copied().unwrap_or(' ')
         } else {
             ' '
         }
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn update(model: &mut Model, msg: Msg) -> Effect {
     use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 
@@ -477,10 +487,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                         model.phase = Phase::Scanning {
                             config: config.clone(),
                             state: ScanState {
-                                files_found: 0,
-                                files_matched: 0,
+                                files_found: 0_usize,
+                                files_matched: 0_usize,
                                 last_path: None,
-                                spinner_tick: 0,
+                                spinner_tick: 0_usize,
                             },
                         };
                     }
@@ -503,7 +513,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                 state.spinner_tick = state.spinner_tick.wrapping_add(1);
             }
             if let Phase::Copying(cs) = &mut model.phase {
-                let cutoff = Instant::now() - std::time::Duration::from_secs(5);
+                let five_secs = std::time::Duration::from_secs(5);
+                let cutoff = Instant::now().checked_sub(five_secs).unwrap_or(Instant::now());
                 cs.speed_bytes.retain(|(t, _)| *t >= cutoff);
             }
             Effect::None
@@ -519,9 +530,9 @@ fn handle_scan(model: &mut Model, scan_msg: ScanMsg) -> Effect {
     match scan_msg {
         ScanMsg::FileFound { path, matched } => {
             if let Phase::Scanning { state, .. } = &mut model.phase {
-                state.files_found += 1;
+                state.files_found = state.files_found.saturating_add(1);
                 if matched {
-                    state.files_matched += 1;
+                    state.files_matched = state.files_matched.saturating_add(1);
                 }
                 state.last_path = Some(path);
             }
@@ -550,10 +561,10 @@ fn handle_scan(model: &mut Model, scan_msg: ScanMsg) -> Effect {
                 })
                 .collect();
 
-            if total_files == 0 {
+            if total_files == 0_usize {
                 model.phase = Phase::Done {
-                    total_files: 0,
-                    total_bytes: 0,
+                    total_files: 0_usize,
+                    total_bytes: 0_u64,
                     errors: vec![],
                     elapsed: std::time::Duration::ZERO,
                 };
@@ -563,12 +574,12 @@ fn handle_scan(model: &mut Model, scan_msg: ScanMsg) -> Effect {
             let copy_state = CopyState {
                 config: config.clone(),
                 files: items,
-                current_index: 0,
+                current_index: 0_usize,
                 total_bytes,
                 total_files,
-                copied_bytes: 0,
-                current_file_copied: 0,
-                current_file_size: 0,
+                copied_bytes: 0_u64,
+                current_file_copied: 0_u64,
+                current_file_size: 0_u64,
                 started_at: Instant::now(),
                 speed_bytes: Vec::new(),
                 errors: Vec::new(),
@@ -594,20 +605,20 @@ fn handle_copy(model: &mut Model, copy_msg: CopyMsg) -> Effect {
         } => {
             if let Phase::Copying(cs) = &mut model.phase {
                 cs.current_index = index;
-                cs.current_file_copied = 0;
+                cs.current_file_copied = 0_u64;
                 cs.current_file_size = size.as_u64();
                 if let Some(item) = cs.files.get_mut(index) {
                     item.status = FileStatus::Copying;
-                    item.name = name;
-                    item.original_path = original_path;
+                    item.name.clone_from(&name);
+                    item.original_path.clone_from(&original_path);
                 }
             }
             Effect::None
         }
         CopyMsg::Progress { bytes_written } => {
             if let Phase::Copying(cs) = &mut model.phase {
-                cs.current_file_copied += bytes_written;
-                cs.copied_bytes += bytes_written;
+                cs.current_file_copied = cs.current_file_copied.saturating_add(bytes_written);
+                cs.copied_bytes = cs.copied_bytes.saturating_add(bytes_written);
                 cs.speed_bytes.push((Instant::now(), bytes_written));
             }
             Effect::None
@@ -695,7 +706,7 @@ fn is_writable_or_creatable(path: &str) -> bool {
         return is_dir_writable(p);
     }
     let mut ancestor = p.to_path_buf();
-    while let Some(parent) = ancestor.parent().map(|pp| pp.to_path_buf()) {
+    while let Some(parent) = ancestor.parent().map(std::path::Path::to_path_buf) {
         if parent.is_dir() {
             return is_dir_writable(&parent);
         }
@@ -720,7 +731,7 @@ fn is_dir_writable(path: &std::path::Path) -> bool {
 
 pub fn dest_existing_prefix_len(value: &str) -> usize {
     if value.is_empty() {
-        return 0;
+        return 0_usize;
     }
     let resolved = resolve_path_value(value);
     let path = std::path::Path::new(&resolved);
@@ -728,7 +739,7 @@ pub fn dest_existing_prefix_len(value: &str) -> usize {
         return value.len();
     }
     let mut ancestor = path.to_path_buf();
-    while let Some(parent) = ancestor.parent().map(|p| p.to_path_buf()) {
+    while let Some(parent) = ancestor.parent().map(std::path::Path::to_path_buf) {
         if parent.is_dir() {
             let resolved_str = resolved.as_str();
             let parent_str = parent.to_str().unwrap_or("");
@@ -738,7 +749,7 @@ pub fn dest_existing_prefix_len(value: &str) -> usize {
         }
         ancestor = parent;
     }
-    0
+    0_usize
 }
 
 fn navigate_to_volumes(form: &mut SetupForm) {
@@ -767,9 +778,12 @@ fn navigate_to_volumes(form: &mut SetupForm) {
     let base: Option<String> = {
         let mut drives: Vec<String> = Vec::new();
         for letter in b'A'..=b'Z' {
+            #[allow(clippy::as_conversions)]
             let drive = format!("{}:\\", letter as char);
             if std::path::Path::new(&drive).exists() {
-                drives.push(format!("{}:/", letter as char));
+                #[allow(clippy::as_conversions)]
+                let drive_path = format!("{}:/", letter as char);
+                drives.push(drive_path);
             }
         }
         if !drives.is_empty() {
@@ -778,11 +792,11 @@ fn navigate_to_volumes(form: &mut SetupForm) {
                 SetupField::Destination => form.destination.clear(),
                 _ => {}
             }
-            form.cursor = 0;
+            form.cursor = 0_usize;
             form.dropdown.entries = drives;
             form.dropdown.visible = true;
-            form.dropdown.selected = 0;
-            form.dropdown.scroll_offset = 0;
+            form.dropdown.selected = 0_usize;
+            form.dropdown.scroll_offset = 0_usize;
             return;
         }
         None
@@ -792,8 +806,8 @@ fn navigate_to_volumes(form: &mut SetupForm) {
 
     if let Some(path) = base {
         match form.focused {
-            SetupField::Source => form.source = path.clone(),
-            SetupField::Destination => form.destination = path.clone(),
+            SetupField::Source => form.source.clone_from(&path),
+            SetupField::Destination => form.destination.clone_from(&path),
             _ => {}
         }
         form.cursor = path.chars().count();
@@ -840,18 +854,15 @@ fn refresh_dropdown(form: &mut SetupForm) {
         (value.as_str(), "")
     } else {
         let path = std::path::Path::new(value.as_str());
-        match (
+        if let (Some(parent), Some(name)) = (
             path.parent().and_then(|p| p.to_str()),
             path.file_name().and_then(|n| n.to_str()),
         ) {
-            (Some(parent), Some(name)) => {
-                let p = if parent.is_empty() { "/" } else { parent };
-                (p, name)
-            }
-            _ => {
-                form.dropdown = Dropdown::default();
-                return;
-            }
+            let p = if parent.is_empty() { "/" } else { parent };
+            (p, name)
+        } else {
+            form.dropdown = Dropdown::default();
+            return;
         }
     };
 
@@ -860,9 +871,9 @@ fn refresh_dropdown(form: &mut SetupForm) {
     let mut entries: Vec<String> = std::fs::read_dir(parent)
         .into_iter()
         .flatten()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter_map(|e| {
-            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
             if !is_dir {
                 return None;
             }
@@ -878,8 +889,8 @@ fn refresh_dropdown(form: &mut SetupForm) {
 
     form.dropdown.visible = !entries.is_empty();
     form.dropdown.entries = entries;
-    form.dropdown.selected = 0;
-    form.dropdown.scroll_offset = 0;
+    form.dropdown.selected = 0_usize;
+    form.dropdown.scroll_offset = 0_usize;
 }
 
 fn apply_autocomplete(form: &mut SetupForm) {
@@ -934,6 +945,7 @@ fn apply_autocomplete(form: &mut SetupForm) {
     refresh_dropdown(form);
 }
 
+#[allow(clippy::too_many_lines)]
 fn update_setup(
     form: &mut SetupForm,
     key: crossterm::event::KeyEvent,
@@ -961,10 +973,10 @@ fn update_setup(
         KeyCode::Down => {
             if form.dropdown.visible {
                 let max = form.dropdown.entries.len().saturating_sub(1);
-                form.dropdown.selected = (form.dropdown.selected + 1).min(max);
-                if form.dropdown.selected >= form.dropdown.scroll_offset + MAX_DROPDOWN {
+                form.dropdown.selected = (form.dropdown.selected.saturating_add(1)).min(max);
+                if form.dropdown.selected >= form.dropdown.scroll_offset.saturating_add(MAX_DROPDOWN) {
                     form.dropdown.scroll_offset =
-                        form.dropdown.selected.saturating_sub(MAX_DROPDOWN - 1);
+                        form.dropdown.selected.saturating_sub(MAX_DROPDOWN.saturating_sub(1));
                 }
             } else {
                 form.focused = form.focused.next();
@@ -987,16 +999,16 @@ fn update_setup(
             Effect::None
         }
         KeyCode::Right if form.focused.is_text() => {
-            let len = form.focused_value().map(|v| v.chars().count()).unwrap_or(0);
-            form.cursor = (form.cursor + 1).min(len);
+            let len = form.focused_value().map_or(0_usize, |v| v.chars().count());
+            form.cursor = (form.cursor.saturating_add(1)).min(len);
             Effect::None
         }
         KeyCode::Char('a') if ctrl && form.focused.is_text() => {
-            form.cursor = 0;
+            form.cursor = 0_usize;
             Effect::None
         }
         KeyCode::Char('e') if ctrl && form.focused.is_text() => {
-            let len = form.focused_value().map(|v| v.chars().count()).unwrap_or(0);
+            let len = form.focused_value().map_or(0_usize, |v| v.chars().count());
             form.cursor = len;
             Effect::None
         }
@@ -1013,10 +1025,10 @@ fn update_setup(
         }
         KeyCode::Tab => {
             if form.focused.is_path() {
-                if !form.dropdown.visible {
-                    refresh_dropdown(form);
-                } else {
+                if form.dropdown.visible {
                     apply_autocomplete(form);
+                } else {
+                    refresh_dropdown(form);
                 }
             }
             Effect::None
@@ -1118,7 +1130,7 @@ fn validate_and_start(form: &mut SetupForm) -> Effect {
     };
 
     let allowed_extensions =
-        crate::filters::resolve_extensions(&include, &exclude, crate::types::DEFAULT_EXTENSIONS);
+        crate::filters::resolve_extensions(include.as_ref(), exclude.as_ref(), crate::types::DEFAULT_EXTENSIONS);
 
     let config = Config {
         source,

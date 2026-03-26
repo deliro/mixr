@@ -9,7 +9,8 @@ use crate::filters::FilterSet;
 use crate::scanner;
 use crate::types::{format_duration, ByteSize, Config, Error};
 
-pub fn run(config: Config) -> Result<bool, Error> {
+#[allow(clippy::too_many_lines, clippy::unnecessary_wraps)]
+pub fn run(config: &Config) -> Result<bool, Error> {
     let mut model = Model::new_cli(config.clone());
     let (tx, rx) = mpsc::channel::<Msg>();
     let mut stderr = io::stderr().lock();
@@ -54,7 +55,6 @@ pub fn run(config: Config) -> Result<bool, Error> {
         let effect = update(&mut model, msg);
 
         match effect {
-            Effect::StartScan(_) => {}
             Effect::StartCopy { files, config } => {
                 let _ = writeln!(stderr);
                 let total: u64 = files.iter().map(|f| f.size.as_u64()).sum();
@@ -84,7 +84,7 @@ pub fn run(config: Config) -> Result<bool, Error> {
                 });
             }
             Effect::Quit => break,
-            Effect::None => {}
+            Effect::StartScan(_) | Effect::None => {}
         }
 
         match &model.phase {
@@ -108,7 +108,7 @@ pub fn run(config: Config) -> Result<bool, Error> {
                         let _ = writeln!(
                             stderr,
                             "[{:>width$}/{}]  {} <- {} ({})",
-                            idx + 1,
+                            idx.saturating_add(1),
                             cs.total_files,
                             cur.name,
                             cur.original_path.display(),
@@ -125,7 +125,8 @@ pub fn run(config: Config) -> Result<bool, Error> {
                 elapsed,
             } => {
                 let _ = writeln!(stderr);
-                let speed = if elapsed.as_secs_f64() > 0.0 {
+                #[allow(clippy::cast_precision_loss, clippy::as_conversions, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let speed = if elapsed.as_secs_f64() > 0.0_f64 {
                     ByteSize((*total_bytes as f64 / elapsed.as_secs_f64()) as u64)
                 } else {
                     ByteSize(0)
@@ -145,7 +146,7 @@ pub fn run(config: Config) -> Result<bool, Error> {
                 had_errors = true;
                 break;
             }
-            _ => {}
+            Phase::Setup(_) => {}
         }
     }
 

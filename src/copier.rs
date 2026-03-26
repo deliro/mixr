@@ -41,7 +41,7 @@ pub fn copy_files(
 ) {
     if let Err(e) = fs::create_dir_all(destination) {
         let _ = tx.send(CopyMsg::Error {
-            index: 0,
+            index: 0_usize,
             path: destination.to_path_buf(),
             error: e.to_string(),
             is_destination: true,
@@ -113,7 +113,7 @@ fn copy_single(
 
     let mut reader = BufReader::with_capacity(BUF_SIZE, src_file);
     let mut writer = BufWriter::with_capacity(BUF_SIZE, dest_file);
-    let mut buf = vec![0u8; BUF_SIZE];
+    let mut buf = vec![0_u8; BUF_SIZE];
 
     loop {
         if shutdown.load(Ordering::Relaxed) {
@@ -123,13 +123,18 @@ fn copy_single(
         }
 
         let bytes_read = reader.read(&mut buf).map_err(|e| (e, false))?;
-        if bytes_read == 0 {
+        if bytes_read == 0_usize {
             break;
         }
 
-        writer.write_all(&buf[..bytes_read]).map_err(|e| (e, true))?;
+        let buf_slice = buf.get(..bytes_read).ok_or_else(|| {
+            (io::Error::new(io::ErrorKind::InvalidData, "slice out of bounds"), false)
+        })?;
+        writer.write_all(buf_slice).map_err(|e| (e, true))?;
+        #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+        let written = bytes_read as u64;
         let _ = tx.send(CopyMsg::Progress {
-            bytes_written: bytes_read as u64,
+            bytes_written: written,
         });
     }
 
@@ -142,7 +147,7 @@ fn dest_path_numbered(destination: &Path, index: usize, source: &Path) -> PathBu
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("bin");
-    destination.join(format!("{:05}.{ext}", index + 1))
+    destination.join(format!("{:05}.{ext}", index.saturating_add(1)))
 }
 
 fn dest_path_keep_name(destination: &Path, source: &Path) -> PathBuf {
@@ -165,7 +170,7 @@ fn dest_path_keep_name(destination: &Path, source: &Path) -> PathBuf {
         .and_then(|e| e.to_str())
         .unwrap_or("bin");
 
-    for counter in 1..=u32::MAX {
+    for counter in 1_u32..=u32::MAX {
         let candidate = destination.join(format!("({counter}) {stem}.{ext}"));
         if !candidate.exists() {
             return candidate;
@@ -189,8 +194,8 @@ mod tests {
     fn make_source_files(dir: &Path) -> Vec<FileEntry> {
         let f1 = dir.join("song1.mp3");
         let f2 = dir.join("song2.flac");
-        fs::write(&f1, vec![1u8; 5000]).unwrap();
-        fs::write(&f2, vec![2u8; 3000]).unwrap();
+        fs::write(&f1, vec![1_u8; 5000]).unwrap();
+        fs::write(&f2, vec![2_u8; 3000]).unwrap();
         vec![
             FileEntry { path: f1, size: ByteSize(5000) },
             FileEntry { path: f2, size: ByteSize(3000) },
@@ -214,8 +219,8 @@ mod tests {
         let dest2 = dst.path().join("00002.flac");
         assert!(dest1.exists());
         assert!(dest2.exists());
-        assert_eq!(fs::read(&dest1).unwrap(), vec![1u8; 5000]);
-        assert_eq!(fs::read(&dest2).unwrap(), vec![2u8; 3000]);
+        assert_eq!(fs::read(&dest1).unwrap(), vec![1_u8; 5000]);
+        assert_eq!(fs::read(&dest2).unwrap(), vec![2_u8; 3000]);
     }
 
     #[test]
@@ -239,8 +244,8 @@ mod tests {
         let src = tempfile::tempdir().unwrap();
         let dst = tempfile::tempdir().unwrap();
         let f1 = src.path().join("song.mp3");
-        fs::write(&f1, vec![1u8; 100]).unwrap();
-        fs::write(dst.path().join("song.mp3"), vec![0u8; 50]).unwrap();
+        fs::write(&f1, vec![1_u8; 100]).unwrap();
+        fs::write(dst.path().join("song.mp3"), vec![0_u8; 50]).unwrap();
 
         let files = vec![FileEntry { path: f1, size: ByteSize(100) }];
         let (tx, _rx) = mpsc::channel();
@@ -287,11 +292,11 @@ mod tests {
     fn dest_path_numbered_format() {
         let dest = Path::new("/usb");
         assert_eq!(
-            dest_path_numbered(dest, 0, Path::new("song.mp3")),
+            dest_path_numbered(dest, 0_usize, Path::new("song.mp3")),
             PathBuf::from("/usb/00001.mp3")
         );
         assert_eq!(
-            dest_path_numbered(dest, 99, Path::new("track.flac")),
+            dest_path_numbered(dest, 99_usize, Path::new("track.flac")),
             PathBuf::from("/usb/00100.flac")
         );
     }

@@ -55,7 +55,7 @@ fn main() -> ExitCode {
             }
 
             let allowed_extensions =
-                resolve_extensions(&args.include, &args.exclude, DEFAULT_EXTENSIONS);
+                resolve_extensions(args.include.as_ref(), args.exclude.as_ref(), DEFAULT_EXTENSIONS);
 
             let config = Config {
                 source,
@@ -67,7 +67,7 @@ fn main() -> ExitCode {
                 allowed_extensions,
             };
 
-            match cli::run(config) {
+            match cli::run(&config) {
                 Ok(true) => ExitCode::SUCCESS,
                 Ok(false) => ExitCode::FAILURE,
                 Err(e) => {

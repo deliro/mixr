@@ -71,8 +71,8 @@ fn contains_live_word(s: &str) -> bool {
 }
 
 pub fn resolve_extensions(
-    include: &Option<Vec<String>>,
-    exclude: &Option<Vec<String>>,
+    include: Option<&Vec<String>>,
+    exclude: Option<&Vec<String>>,
     defaults: &[&str],
 ) -> Vec<String> {
     let base: Vec<String> = match include {
@@ -136,15 +136,16 @@ mod tests {
 
     #[test]
     fn resolve_extensions_defaults() {
-        let result = resolve_extensions(&None, &None, &["mp3", "flac"]);
+        let result = resolve_extensions(None, None, &["mp3", "flac"]);
         assert_eq!(result, vec!["mp3", "flac"]);
     }
 
     #[test]
     fn resolve_extensions_include_overrides() {
+        let inc = vec!["ogg".to_string()];
         let result = resolve_extensions(
-            &Some(vec!["ogg".to_string()]),
-            &None,
+            Some(&inc),
+            None,
             &["mp3", "flac"],
         );
         assert_eq!(result, vec!["ogg"]);
@@ -152,9 +153,10 @@ mod tests {
 
     #[test]
     fn resolve_extensions_exclude() {
+        let exc = vec!["flac".to_string()];
         let result = resolve_extensions(
-            &None,
-            &Some(vec!["flac".to_string()]),
+            None,
+            Some(&exc),
             &["mp3", "flac", "ogg"],
         );
         assert_eq!(result, vec!["mp3", "ogg"]);
@@ -162,9 +164,11 @@ mod tests {
 
     #[test]
     fn resolve_extensions_include_and_exclude() {
+        let inc = vec!["mp3".to_string(), "flac".to_string(), "ogg".to_string()];
+        let exc = vec!["flac".to_string()];
         let result = resolve_extensions(
-            &Some(vec!["mp3".to_string(), "flac".to_string(), "ogg".to_string()]),
-            &Some(vec!["flac".to_string()]),
+            Some(&inc),
+            Some(&exc),
             &["wav"],
         );
         assert_eq!(result, vec!["mp3", "ogg"]);

@@ -40,12 +40,12 @@ impl ByteSize {
             .rfind(|c: char| c.is_ascii_digit() || c == '.')
             .ok_or(ParseSizeError::Empty)?;
 
-        let (num_str, unit_str) = s.split_at(idx + 1);
+        let (num_str, unit_str) = s.split_at(idx.saturating_add(1));
         let num: f64 = num_str
             .parse()
             .map_err(|_| ParseSizeError::InvalidNumber(num_str.to_string()))?;
 
-        if num <= 0.0 {
+        if num <= 0.0_f64 {
             return Err(ParseSizeError::NegativeOrZero);
         }
 
@@ -54,11 +54,16 @@ impl ByteSize {
             "g" | "gb" => GB,
             "m" | "mb" => MB,
             "k" | "kb" => KB,
-            "b" | "" => 1,
+            "b" | "" => 1_u64,
             other => return Err(ParseSizeError::UnknownUnit(other.to_string())),
         };
 
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss,
+            clippy::as_conversions
+        )]
         let result = (num * multiplier as f64) as u64;
         Ok(Self(result))
     }
@@ -69,6 +74,10 @@ impl ByteSize {
 }
 
 impl fmt::Display for ByteSize {
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::as_conversions
+    )]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let bytes = self.0;
         if bytes >= GB {
@@ -150,10 +159,10 @@ impl From<ParseSizeError> for Error {
 
 pub fn format_duration(d: std::time::Duration) -> String {
     let secs = d.as_secs();
-    let h = secs / 3600;
-    let m = (secs % 3600) / 60;
-    let s = secs % 60;
-    if h > 0 {
+    let h = secs / 3600_u64;
+    let m = (secs % 3600_u64) / 60_u64;
+    let s = secs % 60_u64;
+    if h > 0_u64 {
         format!("{h:02}:{m:02}:{s:02}")
     } else {
         format!("{m:02}:{s:02}")
@@ -167,7 +176,9 @@ mod tests {
     #[test]
     fn parse_gigabytes() {
         assert_eq!(ByteSize::parse("8G").unwrap(), ByteSize(8 * GB));
-        assert_eq!(ByteSize::parse("1.5GB").unwrap(), ByteSize((1.5 * GB as f64) as u64));
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss, clippy::as_conversions)]
+        let expected = (1.5_f64 * GB as f64) as u64;
+        assert_eq!(ByteSize::parse("1.5GB").unwrap(), ByteSize(expected));
         assert_eq!(ByteSize::parse("8gb").unwrap(), ByteSize(8 * GB));
     }
 
