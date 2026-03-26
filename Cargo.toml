@@ -1,0 +1,15 @@
+[package]
+name = "mixr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+ratatui = "0.29"
+crossterm = "0.28"
+walkdir = "2"
+fs4 = "0.13"
+rand = "0.9"
+
+[lints.rust]
+warnings = "deny"
