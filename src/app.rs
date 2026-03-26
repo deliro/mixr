@@ -96,6 +96,7 @@ pub struct SetupForm {
     pub focused: SetupField,
     pub error: Option<String>,
     pub dropdown: Dropdown,
+    pub cursor: usize,
 }
 
 impl Default for SetupForm {
@@ -112,11 +113,24 @@ impl Default for SetupForm {
             focused: SetupField::Source,
             error: None,
             dropdown: Dropdown::default(),
+            cursor: 0,
         }
     }
 }
 
 impl SetupForm {
+    pub fn focused_value(&self) -> Option<&str> {
+        match self.focused {
+            SetupField::Source => Some(&self.source),
+            SetupField::Destination => Some(&self.destination),
+            SetupField::Size => Some(&self.size),
+            SetupField::MinSize => Some(&self.min_size),
+            SetupField::Extensions => Some(&self.extensions),
+            SetupField::Exclude => Some(&self.exclude),
+            _ => None,
+        }
+    }
+
     pub fn focused_value_mut(&mut self) -> Option<&mut String> {
         match self.focused {
             SetupField::Source => Some(&mut self.source),
@@ -128,6 +142,94 @@ impl SetupForm {
             _ => None,
         }
     }
+
+    pub fn sync_cursor(&mut self) {
+        let len = self.focused_value().map(|v| v.len()).unwrap_or(0);
+        self.cursor = self.cursor.min(len);
+    }
+
+    fn insert_char(&mut self, c: char) {
+        let cursor = self.cursor;
+        if let Some(val) = self.focused_value_mut() {
+            let byte_idx = char_to_byte_idx(val, cursor);
+            val.insert(byte_idx, c);
+        }
+        self.cursor = cursor + 1;
+    }
+
+    fn delete_char_before_cursor(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let cursor = self.cursor;
+        if let Some(val) = self.focused_value_mut() {
+            let byte_idx = char_to_byte_idx(val, cursor);
+            let prev = char_to_byte_idx(val, cursor - 1);
+            val.drain(prev..byte_idx);
+        }
+        self.cursor = cursor - 1;
+    }
+
+    fn delete_word_before_cursor(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let val = match self.focused_value() {
+            Some(v) => v.to_string(),
+            None => return,
+        };
+        let byte_end = char_to_byte_idx(&val, self.cursor);
+        let before = &val[..byte_end];
+        let new_end = before
+            .rfind('/')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let chars_removed = before[new_end..].chars().count();
+        if let Some(v) = self.focused_value_mut() {
+            v.drain(new_end..byte_end);
+        }
+        self.cursor -= chars_removed;
+    }
+
+    fn word_boundary_left(&self) -> usize {
+        let val = match self.focused_value() {
+            Some(v) => v,
+            None => return 0,
+        };
+        if self.cursor == 0 {
+            return 0;
+        }
+        let byte_pos = char_to_byte_idx(val, self.cursor);
+        let before = &val[..byte_pos];
+        before
+            .rfind('/')
+            .map(|i| val[..i].chars().count())
+            .unwrap_or(0)
+    }
+
+    fn word_boundary_right(&self) -> usize {
+        let val = match self.focused_value() {
+            Some(v) => v,
+            None => return 0,
+        };
+        let len = val.chars().count();
+        if self.cursor >= len {
+            return len;
+        }
+        let byte_pos = char_to_byte_idx(val, self.cursor);
+        let after = &val[byte_pos..];
+        match after[1..].find('/') {
+            Some(i) => self.cursor + 1 + after[1..][..i].chars().count() + 1,
+            None => len,
+        }
+    }
+}
+
+fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
+    s.char_indices()
+        .nth(char_idx)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -516,7 +618,10 @@ pub fn field_is_invalid(field: SetupField, value: &str) -> bool {
     }
     match field {
         SetupField::Size | SetupField::MinSize => ByteSize::parse(value).is_err(),
-        SetupField::Source => !std::path::Path::new(value).exists(),
+        SetupField::Source | SetupField::Destination => {
+            let path = std::path::Path::new(value);
+            !path.is_dir()
+        }
         _ => false,
     }
 }
@@ -562,16 +667,15 @@ fn refresh_dropdown(form: &mut SetupForm) {
         .flatten()
         .filter_map(|e| e.ok())
         .filter_map(|e| {
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if !is_dir {
+                return None;
+            }
             let name = e.file_name().to_str()?.to_string();
             if !name.to_lowercase().starts_with(&prefix_lower) {
                 return None;
             }
-            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            if is_dir {
-                Some(format!("{name}/"))
-            } else {
-                Some(name)
-            }
+            Some(format!("{name}/"))
         })
         .collect();
 
@@ -620,6 +724,7 @@ fn apply_autocomplete(form: &mut SetupForm) {
     };
 
     let new_value = format!("{parent}{entry}");
+    let new_cursor = new_value.chars().count();
 
     match form.focused {
         SetupField::Source => form.source = new_value,
@@ -627,6 +732,7 @@ fn apply_autocomplete(form: &mut SetupForm) {
         _ => {}
     }
 
+    form.cursor = new_cursor;
     form.dropdown.visible = false;
     refresh_dropdown(form);
 }
@@ -635,7 +741,10 @@ fn update_setup(
     form: &mut SetupForm,
     key: crossterm::event::KeyEvent,
 ) -> Effect {
-    use crossterm::event::KeyCode;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
     match key.code {
         KeyCode::Up => {
@@ -648,6 +757,7 @@ fn update_setup(
                 form.focused = form.focused.prev();
                 form.error = None;
                 form.dropdown.visible = false;
+                form.sync_cursor();
             }
             Effect::None
         }
@@ -663,6 +773,40 @@ fn update_setup(
                 form.focused = form.focused.next();
                 form.error = None;
                 form.dropdown.visible = false;
+                form.sync_cursor();
+            }
+            Effect::None
+        }
+        KeyCode::Left if alt && form.focused.is_text() => {
+            form.cursor = form.word_boundary_left();
+            Effect::None
+        }
+        KeyCode::Right if alt && form.focused.is_text() => {
+            form.cursor = form.word_boundary_right();
+            Effect::None
+        }
+        KeyCode::Left if form.focused.is_text() => {
+            form.cursor = form.cursor.saturating_sub(1);
+            Effect::None
+        }
+        KeyCode::Right if form.focused.is_text() => {
+            let len = form.focused_value().map(|v| v.chars().count()).unwrap_or(0);
+            form.cursor = (form.cursor + 1).min(len);
+            Effect::None
+        }
+        KeyCode::Char('a') if ctrl && form.focused.is_text() => {
+            form.cursor = 0;
+            Effect::None
+        }
+        KeyCode::Char('e') if ctrl && form.focused.is_text() => {
+            let len = form.focused_value().map(|v| v.chars().count()).unwrap_or(0);
+            form.cursor = len;
+            Effect::None
+        }
+        KeyCode::Char('w') if ctrl && form.focused.is_text() => {
+            form.delete_word_before_cursor();
+            if form.focused.is_path() {
+                refresh_dropdown(form);
             }
             Effect::None
         }
@@ -682,6 +826,7 @@ fn update_setup(
             } else {
                 form.dropdown.visible = false;
                 form.focused = form.focused.next();
+                form.sync_cursor();
                 Effect::None
             }
         }
@@ -694,18 +839,14 @@ fn update_setup(
             Effect::None
         }
         KeyCode::Char(c) if form.focused.is_text() => {
-            if let Some(val) = form.focused_value_mut() {
-                val.push(c);
-            }
+            form.insert_char(c);
             if form.focused.is_path() {
                 refresh_dropdown(form);
             }
             Effect::None
         }
         KeyCode::Backspace if form.focused.is_text() => {
-            if let Some(val) = form.focused_value_mut() {
-                val.pop();
-            }
+            form.delete_char_before_cursor();
             if form.focused.is_path() {
                 refresh_dropdown(form);
             }
@@ -728,8 +869,8 @@ fn validate_and_start(form: &mut SetupForm) -> Effect {
     }
 
     let source = PathBuf::from(&form.source);
-    if !source.exists() {
-        form.error = Some(format!("Source not found: {}", source.display()));
+    if !source.is_dir() {
+        form.error = Some(format!("Source is not a directory: {}", source.display()));
         form.focused = SetupField::Source;
         return Effect::None;
     }

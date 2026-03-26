@@ -203,17 +203,37 @@ fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
         } else {
             Style::default()
         };
-        let value_style = if field_is_invalid(*field, value) {
+        let invalid = field_is_invalid(*field, value);
+        let value_style = if invalid {
             Style::default().fg(Color::Red)
         } else {
             Style::default()
         };
-        let cursor = if focused { "_" } else { "" };
-        let line = Line::from(vec![
-            Span::styled(format!("{label:<label_width$}"), label_style),
-            Span::styled(format!("{value}{cursor}"), value_style),
-        ]);
-        frame.render_widget(Paragraph::new(line), chunks[i]);
+
+        let mut spans = vec![Span::styled(format!("{label:<label_width$}"), label_style)];
+        if focused {
+            let chars: Vec<char> = value.chars().collect();
+            let cursor_pos = form.cursor.min(chars.len());
+            let before: String = chars[..cursor_pos].iter().collect();
+            let cursor_char = chars.get(cursor_pos).copied().unwrap_or(' ');
+            let after: String = if cursor_pos + 1 < chars.len() {
+                chars[cursor_pos + 1..].iter().collect()
+            } else {
+                String::new()
+            };
+            spans.push(Span::styled(before, value_style));
+            spans.push(Span::styled(
+                cursor_char.to_string(),
+                Style::default().bg(Color::White).fg(Color::Black),
+            ));
+            if !after.is_empty() {
+                spans.push(Span::styled(after, value_style));
+            }
+        } else {
+            spans.push(Span::styled(value.to_string(), value_style));
+        }
+
+        frame.render_widget(Paragraph::new(Line::from(spans)), chunks[i]);
     }
 
     let no_live_marker = if form.no_live { "x" } else { " " };
