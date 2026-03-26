@@ -144,8 +144,8 @@ impl SetupForm {
     }
 
     pub fn sync_cursor(&mut self) {
-        let len = self.focused_value().map(|v| v.len()).unwrap_or(0);
-        self.cursor = self.cursor.min(len);
+        let len = self.focused_value().map(|v| v.chars().count()).unwrap_or(0);
+        self.cursor = len;
     }
 
     fn insert_char(&mut self, c: char) {
