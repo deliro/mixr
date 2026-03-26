@@ -140,6 +140,7 @@ pub struct ScanState {
 
 #[derive(Debug)]
 pub struct CopyState {
+    #[allow(dead_code)]
     pub config: Config,
     pub files: Vec<FileItem>,
     pub current_index: usize,

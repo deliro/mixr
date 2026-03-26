@@ -103,6 +103,7 @@ pub struct Config {
 pub const DEFAULT_EXTENSIONS: &[&str] = &["mp3", "flac", "ogg", "wav", "m4a", "aac", "wma"];
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum Error {
     SourceNotFound(PathBuf),
     InvalidSize(ParseSizeError),

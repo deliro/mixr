@@ -10,6 +10,7 @@ use walkdir::WalkDir;
 use crate::filters::FilterSet;
 use crate::types::{ByteSize, FileEntry};
 
+#[allow(dead_code)]
 pub enum ScanMsg {
     FileFound { path: PathBuf, matched: bool },
     Complete(Vec<FileEntry>),
