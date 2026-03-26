@@ -11,5 +11,8 @@ walkdir = "2"
 fs4 = "0.13"
 rand = "0.9"
 
+[dev-dependencies]
+tempfile = "3"
+
 [lints.rust]
 warnings = "deny"
