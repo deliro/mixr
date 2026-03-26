@@ -7,11 +7,12 @@ use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Gauge, Paragraph, Wrap};
+use ratatui::widgets::{Block, Clear, Gauge, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::{
-    update, CopyState, Effect, FileStatus, Model, Msg, Phase, ScanState, SetupField, SetupForm,
+    field_is_invalid, update, CopyState, Effect, FileStatus, Model, Msg, Phase, ScanState,
+    SetupField, SetupForm,
 };
 use crate::copier;
 use crate::filters::FilterSet;
@@ -197,15 +198,20 @@ fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
 
     for (i, (field, label, value)) in fields.iter().enumerate() {
         let focused = form.focused == *field;
-        let style = if focused {
+        let label_style = if focused {
             Style::default().fg(Color::Yellow)
+        } else {
+            Style::default()
+        };
+        let value_style = if field_is_invalid(*field, value) {
+            Style::default().fg(Color::Red)
         } else {
             Style::default()
         };
         let cursor = if focused { "_" } else { "" };
         let line = Line::from(vec![
-            Span::styled(format!("{label:<label_width$}"), style),
-            Span::raw(format!("{value}{cursor}")),
+            Span::styled(format!("{label:<label_width$}"), label_style),
+            Span::styled(format!("{value}{cursor}"), value_style),
         ]);
         frame.render_widget(Paragraph::new(line), chunks[i]);
     }
@@ -247,11 +253,48 @@ fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
         Line::from(Span::styled(err.as_str(), Style::default().fg(Color::Red)))
     } else {
         Line::from(Span::styled(
-            "Tab: next  Shift+Tab: prev  Enter: go  Ctrl+C: quit",
+            "\u{2191}\u{2193}: navigate  Tab: complete  Enter: go  Ctrl+C: quit",
             Style::default().fg(Color::DarkGray),
         ))
     };
     frame.render_widget(Paragraph::new(help), chunks[11]);
+
+    if form.dropdown.visible && !form.dropdown.entries.is_empty() && form.focused.is_path() {
+        let field_row = match form.focused {
+            SetupField::Source => 0,
+            SetupField::Destination => 1,
+            _ => 0,
+        };
+        let dropdown_y = chunks[field_row].y + 1;
+        let dropdown_x = inner.x + label_width as u16;
+        let dropdown_w = inner.width.saturating_sub(label_width as u16);
+        let visible_count =
+            (form.dropdown.entries.len() - form.dropdown.scroll_offset).min(crate::app::MAX_DROPDOWN);
+        let dropdown_h = visible_count as u16 + 2;
+        let dropdown_rect = Rect::new(dropdown_x, dropdown_y, dropdown_w, dropdown_h);
+
+        let items: Vec<ListItem> = form
+            .dropdown
+            .entries
+            .iter()
+            .skip(form.dropdown.scroll_offset)
+            .take(crate::app::MAX_DROPDOWN)
+            .enumerate()
+            .map(|(i, entry)| {
+                let idx = i + form.dropdown.scroll_offset;
+                let style = if idx == form.dropdown.selected {
+                    Style::default().bg(Color::Yellow).fg(Color::Black)
+                } else {
+                    Style::default()
+                };
+                ListItem::new(Span::styled(entry.as_str(), style))
+            })
+            .collect();
+
+        let list = List::new(items).block(Block::bordered());
+        frame.render_widget(Clear, dropdown_rect);
+        frame.render_widget(list, dropdown_rect);
+    }
 }
 
 fn view_scanning(

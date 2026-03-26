@@ -67,6 +67,20 @@ impl SetupField {
     pub fn is_checkbox(self) -> bool {
         matches!(self, Self::NoLive | Self::KeepNames)
     }
+
+    pub fn is_path(self) -> bool {
+        matches!(self, Self::Source | Self::Destination)
+    }
+}
+
+pub const MAX_DROPDOWN: usize = 8;
+
+#[derive(Debug, Clone, Default)]
+pub struct Dropdown {
+    pub entries: Vec<String>,
+    pub selected: usize,
+    pub scroll_offset: usize,
+    pub visible: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -81,6 +95,7 @@ pub struct SetupForm {
     pub keep_names: bool,
     pub focused: SetupField,
     pub error: Option<String>,
+    pub dropdown: Dropdown,
 }
 
 impl Default for SetupForm {
@@ -96,6 +111,7 @@ impl Default for SetupForm {
             keep_names: false,
             focused: SetupField::Source,
             error: None,
+            dropdown: Dropdown::default(),
         }
     }
 }
@@ -494,6 +510,127 @@ fn handle_copy(model: &mut Model, copy_msg: CopyMsg) -> Effect {
     }
 }
 
+pub fn field_is_invalid(field: SetupField, value: &str) -> bool {
+    if value.is_empty() {
+        return false;
+    }
+    match field {
+        SetupField::Size | SetupField::MinSize => ByteSize::parse(value).is_err(),
+        SetupField::Source => !std::path::Path::new(value).exists(),
+        _ => false,
+    }
+}
+
+fn refresh_dropdown(form: &mut SetupForm) {
+    if !form.focused.is_path() {
+        form.dropdown.visible = false;
+        return;
+    }
+
+    let value = match form.focused {
+        SetupField::Source => &form.source,
+        SetupField::Destination => &form.destination,
+        _ => {
+            form.dropdown.visible = false;
+            return;
+        }
+    };
+
+    let (parent, prefix) = if value.ends_with('/') || value.ends_with(std::path::MAIN_SEPARATOR) {
+        (value.as_str(), "")
+    } else {
+        let path = std::path::Path::new(value.as_str());
+        match (
+            path.parent().and_then(|p| p.to_str()),
+            path.file_name().and_then(|n| n.to_str()),
+        ) {
+            (Some(parent), Some(name)) => {
+                let parent = if parent.is_empty() { "/" } else { parent };
+                (parent, name)
+            }
+            _ => {
+                form.dropdown = Dropdown::default();
+                return;
+            }
+        }
+    };
+
+    let prefix_lower = prefix.to_lowercase();
+
+    let mut entries: Vec<String> = std::fs::read_dir(parent)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_str()?.to_string();
+            if !name.to_lowercase().starts_with(&prefix_lower) {
+                return None;
+            }
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if is_dir {
+                Some(format!("{name}/"))
+            } else {
+                Some(name)
+            }
+        })
+        .collect();
+
+    entries.sort_by_key(|a| a.to_lowercase());
+
+    form.dropdown.visible = !entries.is_empty();
+    form.dropdown.entries = entries;
+    form.dropdown.selected = 0;
+    form.dropdown.scroll_offset = 0;
+}
+
+fn apply_autocomplete(form: &mut SetupForm) {
+    if !form.dropdown.visible || form.dropdown.entries.is_empty() {
+        return;
+    }
+
+    let selected = form
+        .dropdown
+        .entries
+        .get(form.dropdown.selected)
+        .cloned();
+
+    let Some(entry) = selected else { return };
+
+    let value = match form.focused {
+        SetupField::Source => &form.source,
+        SetupField::Destination => &form.destination,
+        _ => return,
+    };
+
+    let parent = if value.ends_with('/') || value.ends_with(std::path::MAIN_SEPARATOR) {
+        value.clone()
+    } else {
+        let path = std::path::Path::new(value.as_str());
+        match path.parent().and_then(|p| p.to_str()) {
+            Some("") => "/".to_string(),
+            Some(p) => {
+                let mut s = p.to_string();
+                if !s.ends_with('/') {
+                    s.push('/');
+                }
+                s
+            }
+            None => return,
+        }
+    };
+
+    let new_value = format!("{parent}{entry}");
+
+    match form.focused {
+        SetupField::Source => form.source = new_value,
+        SetupField::Destination => form.destination = new_value,
+        _ => {}
+    }
+
+    form.dropdown.visible = false;
+    refresh_dropdown(form);
+}
+
 fn update_setup(
     form: &mut SetupForm,
     key: crossterm::event::KeyEvent,
@@ -501,20 +638,49 @@ fn update_setup(
     use crossterm::event::KeyCode;
 
     match key.code {
-        KeyCode::Tab => {
-            form.focused = form.focused.next();
-            form.error = None;
+        KeyCode::Up => {
+            if form.dropdown.visible {
+                form.dropdown.selected = form.dropdown.selected.saturating_sub(1);
+                if form.dropdown.selected < form.dropdown.scroll_offset {
+                    form.dropdown.scroll_offset = form.dropdown.selected;
+                }
+            } else {
+                form.focused = form.focused.prev();
+                form.error = None;
+                form.dropdown.visible = false;
+            }
             Effect::None
         }
-        KeyCode::BackTab => {
-            form.focused = form.focused.prev();
-            form.error = None;
+        KeyCode::Down => {
+            if form.dropdown.visible {
+                let max = form.dropdown.entries.len().saturating_sub(1);
+                form.dropdown.selected = (form.dropdown.selected + 1).min(max);
+                if form.dropdown.selected >= form.dropdown.scroll_offset + MAX_DROPDOWN {
+                    form.dropdown.scroll_offset =
+                        form.dropdown.selected.saturating_sub(MAX_DROPDOWN - 1);
+                }
+            } else {
+                form.focused = form.focused.next();
+                form.error = None;
+                form.dropdown.visible = false;
+            }
+            Effect::None
+        }
+        KeyCode::Tab => {
+            if form.focused.is_path() {
+                apply_autocomplete(form);
+            }
+            Effect::None
+        }
+        KeyCode::Esc => {
+            form.dropdown.visible = false;
             Effect::None
         }
         KeyCode::Enter => {
             if form.focused == SetupField::Start {
                 validate_and_start(form)
             } else {
+                form.dropdown.visible = false;
                 form.focused = form.focused.next();
                 Effect::None
             }
@@ -531,11 +697,17 @@ fn update_setup(
             if let Some(val) = form.focused_value_mut() {
                 val.push(c);
             }
+            if form.focused.is_path() {
+                refresh_dropdown(form);
+            }
             Effect::None
         }
         KeyCode::Backspace if form.focused.is_text() => {
             if let Some(val) = form.focused_value_mut() {
                 val.pop();
+            }
+            if form.focused.is_path() {
+                refresh_dropdown(form);
             }
             Effect::None
         }
@@ -637,9 +809,9 @@ mod tests {
     }
 
     #[test]
-    fn setup_tab_navigation() {
+    fn setup_arrow_navigation() {
         let mut model = Model::new_tui();
-        update(&mut model, key(KeyCode::Tab));
+        update(&mut model, key(KeyCode::Down));
         if let Phase::Setup(form) = &model.phase {
             assert_eq!(form.focused, SetupField::Destination);
         } else {
