@@ -1,4 +1,6 @@
 #[allow(dead_code)]
+mod app;
+#[allow(dead_code)]
 mod copier;
 #[allow(dead_code)]
 mod filters;
