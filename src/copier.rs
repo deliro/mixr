@@ -1,0 +1,299 @@
+use std::fs;
+use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
+use std::sync::Arc;
+
+use crate::types::{ByteSize, FileEntry};
+
+const BUF_SIZE: usize = 64 * 1024;
+
+pub enum CopyMsg {
+    FileStart {
+        index: usize,
+        name: String,
+        original_path: PathBuf,
+        size: ByteSize,
+    },
+    Progress {
+        bytes_written: u64,
+    },
+    FileDone {
+        index: usize,
+    },
+    Error {
+        index: usize,
+        path: PathBuf,
+        error: String,
+        is_destination: bool,
+    },
+    Complete,
+    Aborted,
+}
+
+pub fn copy_files(
+    files: &[FileEntry],
+    destination: &Path,
+    keep_names: bool,
+    tx: &Sender<CopyMsg>,
+    shutdown: &Arc<AtomicBool>,
+) {
+    if let Err(e) = fs::create_dir_all(destination) {
+        let _ = tx.send(CopyMsg::Error {
+            index: 0,
+            path: destination.to_path_buf(),
+            error: e.to_string(),
+            is_destination: true,
+        });
+        return;
+    }
+
+    for (index, entry) in files.iter().enumerate() {
+        if shutdown.load(Ordering::Relaxed) {
+            let _ = tx.send(CopyMsg::Aborted);
+            return;
+        }
+
+        let dest_path = if keep_names {
+            dest_path_keep_name(destination, &entry.path)
+        } else {
+            dest_path_numbered(destination, index, &entry.path)
+        };
+
+        let name = dest_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let _ = tx.send(CopyMsg::FileStart {
+            index,
+            name,
+            original_path: entry.path.clone(),
+            size: entry.size,
+        });
+
+        match copy_single(&entry.path, &dest_path, tx, shutdown) {
+            Ok(()) => {
+                let _ = tx.send(CopyMsg::FileDone { index });
+            }
+            Err((error, is_destination)) => {
+                if is_destination {
+                    let _ = cleanup_partial(&dest_path);
+                }
+                let _ = tx.send(CopyMsg::Error {
+                    index,
+                    path: entry.path.clone(),
+                    error: error.to_string(),
+                    is_destination,
+                });
+                if is_destination {
+                    return;
+                }
+            }
+        }
+    }
+
+    let _ = tx.send(CopyMsg::Complete);
+}
+
+fn copy_single(
+    source: &Path,
+    dest: &Path,
+    tx: &Sender<CopyMsg>,
+    shutdown: &Arc<AtomicBool>,
+) -> Result<(), (io::Error, bool)> {
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|e| (e, true))?;
+    }
+
+    let src_file = fs::File::open(source).map_err(|e| (e, false))?;
+    let dest_file = fs::File::create(dest).map_err(|e| (e, true))?;
+
+    let mut reader = BufReader::with_capacity(BUF_SIZE, src_file);
+    let mut writer = BufWriter::with_capacity(BUF_SIZE, dest_file);
+    let mut buf = vec![0u8; BUF_SIZE];
+
+    loop {
+        if shutdown.load(Ordering::Relaxed) {
+            drop(writer);
+            let _ = cleanup_partial(dest);
+            return Err((io::Error::new(io::ErrorKind::Interrupted, "shutdown"), true));
+        }
+
+        let bytes_read = reader.read(&mut buf).map_err(|e| (e, false))?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        writer.write_all(&buf[..bytes_read]).map_err(|e| (e, true))?;
+        let _ = tx.send(CopyMsg::Progress {
+            bytes_written: bytes_read as u64,
+        });
+    }
+
+    writer.flush().map_err(|e| (e, true))?;
+    Ok(())
+}
+
+fn dest_path_numbered(destination: &Path, index: usize, source: &Path) -> PathBuf {
+    let ext = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin");
+    destination.join(format!("{:05}.{ext}", index + 1))
+}
+
+fn dest_path_keep_name(destination: &Path, source: &Path) -> PathBuf {
+    let filename = source
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+
+    let base = destination.join(filename);
+    if !base.exists() {
+        return base;
+    }
+
+    let stem = source
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown");
+    let ext = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin");
+
+    let mut counter = 1u32;
+    loop {
+        let candidate = destination.join(format!("({counter}) {stem}.{ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        counter += 1;
+    }
+}
+
+fn cleanup_partial(path: &Path) -> io::Result<()> {
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    fn make_source_files(dir: &Path) -> Vec<FileEntry> {
+        let f1 = dir.join("song1.mp3");
+        let f2 = dir.join("song2.flac");
+        fs::write(&f1, vec![1u8; 5000]).unwrap();
+        fs::write(&f2, vec![2u8; 3000]).unwrap();
+        vec![
+            FileEntry { path: f1, size: ByteSize(5000) },
+            FileEntry { path: f2, size: ByteSize(3000) },
+        ]
+    }
+
+    #[test]
+    fn copy_numbered() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let files = make_source_files(src.path());
+        let (tx, rx) = mpsc::channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
+
+        copy_files(&files, dst.path(), false, &tx, &shutdown);
+
+        let messages: Vec<CopyMsg> = rx.try_iter().collect();
+        assert!(matches!(messages.last().unwrap(), CopyMsg::Complete));
+
+        let dest1 = dst.path().join("00001.mp3");
+        let dest2 = dst.path().join("00002.flac");
+        assert!(dest1.exists());
+        assert!(dest2.exists());
+        assert_eq!(fs::read(&dest1).unwrap(), vec![1u8; 5000]);
+        assert_eq!(fs::read(&dest2).unwrap(), vec![2u8; 3000]);
+    }
+
+    #[test]
+    fn copy_keep_names() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let files = make_source_files(src.path());
+        let (tx, rx) = mpsc::channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
+
+        copy_files(&files, dst.path(), true, &tx, &shutdown);
+
+        let messages: Vec<CopyMsg> = rx.try_iter().collect();
+        assert!(matches!(messages.last().unwrap(), CopyMsg::Complete));
+        assert!(dst.path().join("song1.mp3").exists());
+        assert!(dst.path().join("song2.flac").exists());
+    }
+
+    #[test]
+    fn copy_deduplicates_names() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let f1 = src.path().join("song.mp3");
+        fs::write(&f1, vec![1u8; 100]).unwrap();
+        fs::write(dst.path().join("song.mp3"), vec![0u8; 50]).unwrap();
+
+        let files = vec![FileEntry { path: f1, size: ByteSize(100) }];
+        let (tx, _rx) = mpsc::channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
+
+        copy_files(&files, dst.path(), true, &tx, &shutdown);
+
+        assert!(dst.path().join("(1) song.mp3").exists());
+    }
+
+    #[test]
+    fn copy_skips_missing_source() {
+        let dst = tempfile::tempdir().unwrap();
+        let files = vec![FileEntry {
+            path: PathBuf::from("/nonexistent/song.mp3"),
+            size: ByteSize(100),
+        }];
+        let (tx, rx) = mpsc::channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
+
+        copy_files(&files, dst.path(), false, &tx, &shutdown);
+
+        let messages: Vec<CopyMsg> = rx.try_iter().collect();
+        let has_error = messages.iter().any(|m| matches!(m, CopyMsg::Error { is_destination: false, .. }));
+        let has_complete = messages.iter().any(|m| matches!(m, CopyMsg::Complete));
+        assert!(has_error);
+        assert!(has_complete);
+    }
+
+    #[test]
+    fn copy_respects_shutdown() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let files = make_source_files(src.path());
+        let (tx, _rx) = mpsc::channel();
+        let shutdown = Arc::new(AtomicBool::new(true));
+
+        copy_files(&files, dst.path(), false, &tx, &shutdown);
+
+        assert!(!dst.path().join("00001.mp3").exists());
+    }
+
+    #[test]
+    fn dest_path_numbered_format() {
+        let dest = Path::new("/usb");
+        assert_eq!(
+            dest_path_numbered(dest, 0, Path::new("song.mp3")),
+            PathBuf::from("/usb/00001.mp3")
+        );
+        assert_eq!(
+            dest_path_numbered(dest, 99, Path::new("track.flac")),
+            PathBuf::from("/usb/00100.flac")
+        );
+    }
+}
