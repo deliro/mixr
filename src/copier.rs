@@ -165,14 +165,13 @@ fn dest_path_keep_name(destination: &Path, source: &Path) -> PathBuf {
         .and_then(|e| e.to_str())
         .unwrap_or("bin");
 
-    let mut counter = 1u32;
-    loop {
+    for counter in 1..=u32::MAX {
         let candidate = destination.join(format!("({counter}) {stem}.{ext}"));
         if !candidate.exists() {
             return candidate;
         }
-        counter += 1;
     }
+    destination.join(format!("{stem}.{ext}"))
 }
 
 fn cleanup_partial(path: &Path) -> io::Result<()> {

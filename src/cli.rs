@@ -50,12 +50,7 @@ pub fn run(config: Config) -> Result<bool, Error> {
     let mut had_errors = false;
     let mut last_printed_index: Option<usize> = None;
 
-    loop {
-        let msg = match rx.recv() {
-            Ok(m) => m,
-            Err(_) => break,
-        };
-
+    while let Ok(msg) = rx.recv() {
         let effect = update(&mut model, msg);
 
         match effect {

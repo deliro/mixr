@@ -49,6 +49,11 @@ fn main() -> ExitCode {
 
     match (args.source, args.destination) {
         (Some(source), Some(destination)) => {
+            if !source.exists() {
+                eprintln!("Error: source not found: {}", source.display());
+                return ExitCode::FAILURE;
+            }
+
             let allowed_extensions =
                 resolve_extensions(&args.include, &args.exclude, DEFAULT_EXTENSIONS);
 

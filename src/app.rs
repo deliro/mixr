@@ -156,22 +156,19 @@ pub struct CopyState {
 
 impl CopyState {
     pub fn speed(&self) -> f64 {
-        let cutoff = Instant::now() - std::time::Duration::from_secs(3);
-        let recent: Vec<_> = self
+        let window = std::time::Duration::from_secs(3);
+        let now = Instant::now();
+        let cutoff = now - window;
+        let total: u64 = self
             .speed_bytes
             .iter()
             .filter(|(t, _)| *t >= cutoff)
-            .collect();
-        if recent.len() < 2 {
+            .map(|(_, b)| b)
+            .sum();
+        if total == 0 {
             return 0.0;
         }
-        let total: u64 = recent.iter().map(|(_, b)| b).sum();
-        let elapsed = match (recent.last(), recent.first()) {
-            (Some(last), Some(first)) => last.0.duration_since(first.0),
-            _ => return 0.0,
-        };
-        let secs = elapsed.as_secs_f64().max(0.1);
-        total as f64 / secs
+        total as f64 / window.as_secs_f64()
     }
 
     pub fn upcoming(&self) -> impl Iterator<Item = &FileItem> {
@@ -444,10 +441,10 @@ fn handle_copy(model: &mut Model, copy_msg: CopyMsg) -> Effect {
             Effect::None
         }
         CopyMsg::FileDone { index } => {
-            if let Phase::Copying(cs) = &mut model.phase {
-                if let Some(item) = cs.files.get_mut(index) {
-                    item.status = FileStatus::Done;
-                }
+            if let Phase::Copying(cs) = &mut model.phase
+                && let Some(item) = cs.files.get_mut(index)
+            {
+                item.status = FileStatus::Done;
             }
             Effect::None
         }
