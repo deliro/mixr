@@ -11,8 +11,8 @@ use ratatui::widgets::{Block, Clear, Gauge, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::{
-    field_is_invalid, update, CopyState, Effect, FileStatus, Model, Msg, Phase, ScanState,
-    SetupField, SetupForm,
+    dest_existing_prefix_len, field_is_invalid, update, CopyState, Effect, FileStatus, Model, Msg,
+    Phase, ScanState, SetupField, SetupForm,
 };
 use crate::copier;
 use crate::filters::FilterSet;
@@ -204,33 +204,76 @@ fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
             Style::default()
         };
         let invalid = field_is_invalid(*field, value);
-        let value_style = if invalid {
-            Style::default().fg(Color::Red)
+
+        let dest_split = if *field == SetupField::Destination && !value.is_empty() {
+            Some(dest_existing_prefix_len(value))
         } else {
-            Style::default()
+            None
         };
 
         let mut spans = vec![Span::styled(format!("{label:<label_width$}"), label_style)];
+
         if focused {
             let chars: Vec<char> = value.chars().collect();
             let cursor_pos = form.cursor.min(chars.len());
-            let before: String = chars[..cursor_pos].iter().collect();
-            let cursor_char = chars.get(cursor_pos).copied().unwrap_or(' ');
-            let after: String = if cursor_pos + 1 < chars.len() {
-                chars[cursor_pos + 1..].iter().collect()
-            } else {
-                String::new()
+
+            let style_for_char = |ci: usize| -> Style {
+                if invalid {
+                    Style::default().fg(Color::Red)
+                } else if let Some(split) = dest_split {
+                    let byte_pos = chars[..ci].iter().collect::<String>().len();
+                    if byte_pos >= split {
+                        Style::default().fg(Color::Yellow)
+                    } else {
+                        Style::default()
+                    }
+                } else {
+                    Style::default()
+                }
             };
-            spans.push(Span::styled(before, value_style));
-            spans.push(Span::styled(
-                cursor_char.to_string(),
-                Style::default().bg(Color::White).fg(Color::Black),
-            ));
-            if !after.is_empty() {
-                spans.push(Span::styled(after, value_style));
+
+            let mut run_start = 0;
+            while run_start < chars.len() {
+                if run_start == cursor_pos {
+                    spans.push(Span::styled(
+                        chars[cursor_pos].to_string(),
+                        Style::default().bg(Color::White).fg(Color::Black),
+                    ));
+                    run_start += 1;
+                    continue;
+                }
+                let style = style_for_char(run_start);
+                let mut run_end = run_start + 1;
+                while run_end < chars.len()
+                    && run_end != cursor_pos
+                    && style_for_char(run_end) == style
+                {
+                    run_end += 1;
+                }
+                let text: String = chars[run_start..run_end].iter().collect();
+                spans.push(Span::styled(text, style));
+                run_start = run_end;
             }
+            if cursor_pos >= chars.len() {
+                spans.push(Span::styled(
+                    " ".to_string(),
+                    Style::default().bg(Color::White).fg(Color::Black),
+                ));
+            }
+        } else if let Some(split) = dest_split {
+            if split >= value.len() {
+                spans.push(Span::raw(value.to_string()));
+            } else {
+                spans.push(Span::raw(value[..split].to_string()));
+                spans.push(Span::styled(
+                    value[split..].to_string(),
+                    Style::default().fg(Color::Yellow),
+                ));
+            }
+        } else if invalid {
+            spans.push(Span::styled(value.to_string(), Style::default().fg(Color::Red)));
         } else {
-            spans.push(Span::styled(value.to_string(), value_style));
+            spans.push(Span::raw(value.to_string()));
         }
 
         frame.render_widget(Paragraph::new(Line::from(spans)), chunks[i]);

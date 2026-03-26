@@ -646,12 +646,35 @@ pub fn field_is_invalid(field: SetupField, value: &str) -> bool {
     }
     match field {
         SetupField::Size | SetupField::MinSize => ByteSize::parse(value).is_err(),
-        SetupField::Source | SetupField::Destination => {
+        SetupField::Source => {
             let resolved = resolve_path_value(value);
             !std::path::Path::new(&resolved).is_dir()
         }
         _ => false,
     }
+}
+
+pub fn dest_existing_prefix_len(value: &str) -> usize {
+    if value.is_empty() {
+        return 0;
+    }
+    let resolved = resolve_path_value(value);
+    let path = std::path::Path::new(&resolved);
+    if path.is_dir() {
+        return value.len();
+    }
+    let mut ancestor = path.to_path_buf();
+    while let Some(parent) = ancestor.parent().map(|p| p.to_path_buf()) {
+        if parent.is_dir() {
+            let resolved_str = resolved.as_str();
+            let parent_str = parent.to_str().unwrap_or("");
+            let existing_len = parent_str.len();
+            let offset = resolved_str.len().saturating_sub(value.len());
+            return existing_len.saturating_sub(offset);
+        }
+        ancestor = parent;
+    }
+    0
 }
 
 fn resolve_path_value(raw: &str) -> String {
