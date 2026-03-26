@@ -9,11 +9,7 @@ pub struct FilterSet {
 }
 
 impl FilterSet {
-    pub fn new(
-        allowed_extensions: Vec<String>,
-        min_size: Option<ByteSize>,
-        no_live: bool,
-    ) -> Self {
+    pub fn new(allowed_extensions: Vec<String>, min_size: Option<ByteSize>, no_live: bool) -> Self {
         Self {
             allowed_extensions,
             min_size,
@@ -22,9 +18,7 @@ impl FilterSet {
     }
 
     pub fn matches(&self, path: &Path, size: u64) -> bool {
-        self.matches_extension(path)
-            && self.matches_min_size(size)
-            && self.matches_live(path)
+        self.matches_extension(path) && self.matches_min_size(size) && self.matches_live(path)
     }
 
     fn matches_extension(&self, path: &Path) -> bool {
@@ -82,7 +76,9 @@ pub fn resolve_extensions(
     match exclude {
         Some(exc) => {
             let exc_lower: Vec<String> = exc.iter().map(|s| s.to_lowercase()).collect();
-            base.into_iter().filter(|e| !exc_lower.contains(e)).collect()
+            base.into_iter()
+                .filter(|e| !exc_lower.contains(e))
+                .collect()
         }
         None => base,
     }
@@ -143,22 +139,14 @@ mod tests {
     #[test]
     fn resolve_extensions_include_overrides() {
         let inc = vec!["ogg".to_string()];
-        let result = resolve_extensions(
-            Some(&inc),
-            None,
-            &["mp3", "flac"],
-        );
+        let result = resolve_extensions(Some(&inc), None, &["mp3", "flac"]);
         assert_eq!(result, vec!["ogg"]);
     }
 
     #[test]
     fn resolve_extensions_exclude() {
         let exc = vec!["flac".to_string()];
-        let result = resolve_extensions(
-            None,
-            Some(&exc),
-            &["mp3", "flac", "ogg"],
-        );
+        let result = resolve_extensions(None, Some(&exc), &["mp3", "flac", "ogg"]);
         assert_eq!(result, vec!["mp3", "ogg"]);
     }
 
@@ -166,11 +154,7 @@ mod tests {
     fn resolve_extensions_include_and_exclude() {
         let inc = vec!["mp3".to_string(), "flac".to_string(), "ogg".to_string()];
         let exc = vec!["flac".to_string()];
-        let result = resolve_extensions(
-            Some(&inc),
-            Some(&exc),
-            &["wav"],
-        );
+        let result = resolve_extensions(Some(&inc), Some(&exc), &["wav"]);
         assert_eq!(result, vec!["mp3", "ogg"]);
     }
 }

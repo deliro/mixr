@@ -16,7 +16,11 @@ use filters::resolve_extensions;
 use types::{ByteSize, Config, DEFAULT_EXTENSIONS};
 
 #[derive(Parser)]
-#[command(name = "mixr", version, about = "Fill your flash drive with random music")]
+#[command(
+    name = "mixr",
+    version,
+    about = "Fill your flash drive with random music"
+)]
 struct Args {
     source: Option<PathBuf>,
 
@@ -39,6 +43,9 @@ struct Args {
 
     #[arg(long)]
     keep_names: bool,
+
+    #[arg(long)]
+    overwrite: bool,
 }
 
 fn parse_byte_size(s: &str) -> Result<ByteSize, String> {
@@ -56,8 +63,11 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
 
-            let allowed_extensions =
-                resolve_extensions(args.include.as_ref(), args.exclude.as_ref(), DEFAULT_EXTENSIONS);
+            let allowed_extensions = resolve_extensions(
+                args.include.as_ref(),
+                args.exclude.as_ref(),
+                DEFAULT_EXTENSIONS,
+            );
 
             let config = Config {
                 source,
@@ -66,6 +76,7 @@ fn main() -> ExitCode {
                 min_file_size: args.min_size,
                 no_live: args.no_live,
                 keep_names: args.keep_names,
+                overwrite: args.overwrite,
                 allowed_extensions,
             };
 

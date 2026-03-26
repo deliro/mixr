@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
 
-use rand::seq::SliceRandom;
 use rand::rng;
+use rand::seq::SliceRandom;
 use walkdir::WalkDir;
 
 use crate::filters::FilterSet;
@@ -127,11 +127,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         create_test_tree(dir.path());
 
-        let filters = FilterSet::new(
-            vec!["mp3".to_string(), "flac".to_string()],
-            None,
-            false,
-        );
+        let filters = FilterSet::new(vec!["mp3".to_string(), "flac".to_string()], None, false);
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
         scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
@@ -151,11 +147,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         create_test_tree(dir.path());
 
-        let filters = FilterSet::new(
-            vec!["mp3".to_string(), "flac".to_string()],
-            None,
-            true,
-        );
+        let filters = FilterSet::new(vec!["mp3".to_string(), "flac".to_string()], None, true);
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
         scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
@@ -165,7 +157,11 @@ mod tests {
         match complete {
             ScanMsg::Complete(files) => {
                 assert_eq!(files.len(), 4);
-                assert!(!files.iter().any(|f| f.path.to_str().unwrap().contains("concert")));
+                assert!(
+                    !files
+                        .iter()
+                        .any(|f| f.path.to_str().unwrap().contains("concert"))
+                );
             }
             _ => panic!("expected Complete"),
         }
@@ -176,11 +172,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         create_test_tree(dir.path());
 
-        let filters = FilterSet::new(
-            vec!["mp3".to_string()],
-            Some(ByteSize(1000)),
-            false,
-        );
+        let filters = FilterSet::new(vec!["mp3".to_string()], Some(ByteSize(1000)), false);
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
         scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
@@ -190,7 +182,11 @@ mod tests {
         match complete {
             ScanMsg::Complete(files) => {
                 assert!(files.iter().all(|f| f.size.as_u64() >= 1000));
-                assert!(!files.iter().any(|f| f.path.to_str().unwrap().contains("tiny")));
+                assert!(
+                    !files
+                        .iter()
+                        .any(|f| f.path.to_str().unwrap().contains("tiny"))
+                );
             }
             _ => panic!("expected Complete"),
         }
@@ -199,9 +195,18 @@ mod tests {
     #[test]
     fn pack_into_budget_respects_limit() {
         let files = vec![
-            FileEntry { path: PathBuf::from("a.mp3"), size: ByteSize(5000) },
-            FileEntry { path: PathBuf::from("b.mp3"), size: ByteSize(3000) },
-            FileEntry { path: PathBuf::from("c.mp3"), size: ByteSize(4000) },
+            FileEntry {
+                path: PathBuf::from("a.mp3"),
+                size: ByteSize(5000),
+            },
+            FileEntry {
+                path: PathBuf::from("b.mp3"),
+                size: ByteSize(3000),
+            },
+            FileEntry {
+                path: PathBuf::from("c.mp3"),
+                size: ByteSize(4000),
+            },
         ];
         let selected = pack_into_budget(files, 8000);
         let total: u64 = selected.iter().map(|f| f.size.as_u64()).sum();
@@ -211,9 +216,10 @@ mod tests {
 
     #[test]
     fn pack_stops_after_consecutive_skips() {
-        let files = vec![
-            FileEntry { path: PathBuf::from("huge.mp3"), size: ByteSize(1_000_000) },
-        ];
+        let files = vec![FileEntry {
+            path: PathBuf::from("huge.mp3"),
+            size: ByteSize(1_000_000),
+        }];
         let selected = pack_into_budget(files, 100);
         assert!(selected.is_empty());
     }

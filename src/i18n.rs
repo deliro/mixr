@@ -7,6 +7,7 @@ pub struct Locale {
     pub exclude: &'static str,
     pub no_live: &'static str,
     pub keep_names: &'static str,
+    pub overwrite: &'static str,
     pub start: &'static str,
 
     pub ph_source: &'static str,
@@ -64,8 +65,9 @@ pub static EN: Locale = Locale {
     min_size: "Min size:",
     extensions: "Extensions:",
     exclude: "Exclude:",
-    no_live: "No live",
-    keep_names: "Keep names",
+    no_live: "No live:",
+    keep_names: "Keep names:",
+    overwrite: "Overwrite:",
     start: "Start",
 
     ph_source: "~/Music",
@@ -122,8 +124,9 @@ pub static RU: Locale = Locale {
     min_size: "Мин. размер:",
     extensions: "Расширения:",
     exclude: "Исключить:",
-    no_live: "Без live",
-    keep_names: "Сохранить имена",
+    no_live: "Без live:",
+    keep_names: "Сохр. имена:",
+    overwrite: "Перезаписать:",
     start: "Старт",
 
     ph_source: "~/Музыка",

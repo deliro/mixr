@@ -1,6 +1,6 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use crate::copier::CopyMsg;
@@ -21,6 +21,7 @@ pub enum SetupField {
     Exclude,
     NoLive,
     KeepNames,
+    Overwrite,
     Start,
 }
 
@@ -34,7 +35,8 @@ impl SetupField {
             Self::Extensions => Self::Exclude,
             Self::Exclude => Self::NoLive,
             Self::NoLive => Self::KeepNames,
-            Self::KeepNames => Self::Start,
+            Self::KeepNames => Self::Overwrite,
+            Self::Overwrite => Self::Start,
             Self::Start => Self::Source,
         }
     }
@@ -49,7 +51,8 @@ impl SetupField {
             Self::Exclude => Self::Extensions,
             Self::NoLive => Self::Exclude,
             Self::KeepNames => Self::NoLive,
-            Self::Start => Self::KeepNames,
+            Self::Overwrite => Self::KeepNames,
+            Self::Start => Self::Overwrite,
         }
     }
 
@@ -66,7 +69,7 @@ impl SetupField {
     }
 
     pub fn is_checkbox(self) -> bool {
-        matches!(self, Self::NoLive | Self::KeepNames)
+        matches!(self, Self::NoLive | Self::KeepNames | Self::Overwrite)
     }
 
     pub fn is_path(self) -> bool {
@@ -110,6 +113,7 @@ pub struct SetupForm {
     pub exclude: String,
     pub no_live: bool,
     pub keep_names: bool,
+    pub overwrite: bool,
     pub focused: SetupField,
     pub error: Option<String>,
     pub dropdown: Dropdown,
@@ -127,6 +131,7 @@ impl Default for SetupForm {
             exclude: String::new(),
             no_live: false,
             keep_names: false,
+            overwrite: false,
             focused: SetupField::Source,
             error: None,
             dropdown: Dropdown::default(),
@@ -205,7 +210,9 @@ impl SetupForm {
     }
 
     fn word_boundary_left(&self) -> usize {
-        let Some(val) = self.focused_value() else { return 0_usize };
+        let Some(val) = self.focused_value() else {
+            return 0_usize;
+        };
         let chars: Vec<char> = val.chars().collect();
         if self.cursor == 0_usize {
             return 0_usize;
@@ -227,7 +234,9 @@ impl SetupForm {
     }
 
     fn word_boundary_right(&self) -> usize {
-        let Some(val) = self.focused_value() else { return 0_usize };
+        let Some(val) = self.focused_value() else {
+            return 0_usize;
+        };
         let chars: Vec<char> = val.chars().collect();
         let len = chars.len();
         if self.cursor >= len {
@@ -255,9 +264,7 @@ fn is_word_separator(c: char) -> bool {
 }
 
 fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
-    s.char_indices()
-        .nth(char_idx)
-        .map_or(s.len(), |(i, _)| i)
+    s.char_indices().nth(char_idx).map_or(s.len(), |(i, _)| i)
 }
 
 fn expand_tilde(s: &str) -> Option<String> {
@@ -419,7 +426,10 @@ pub enum Effect {
     Quit,
 }
 
-const SPINNER_CHARS: &[char] = &['\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}', '\u{2827}', '\u{2807}', '\u{280F}'];
+const SPINNER_CHARS: &[char] = &[
+    '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}', '\u{2827}',
+    '\u{2807}', '\u{280F}',
+];
 
 impl Model {
     pub fn new_tui() -> Self {
@@ -453,7 +463,11 @@ impl Model {
     pub fn spinner_char(&self) -> char {
         if let Phase::Scanning { state, .. } = &self.phase {
             let len = SPINNER_CHARS.len();
-            let idx = if len == 0_usize { 0_usize } else { state.spinner_tick.checked_rem(len).unwrap_or(0_usize) };
+            let idx = if len == 0_usize {
+                0_usize
+            } else {
+                state.spinner_tick.checked_rem(len).unwrap_or(0_usize)
+            };
             SPINNER_CHARS.get(idx).copied().unwrap_or(' ')
         } else {
             ' '
@@ -476,9 +490,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                 return Effect::None;
             }
 
-            if key.code == KeyCode::Char('c')
-                && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
+            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                 model.shutdown.store(true, Ordering::Relaxed);
                 model.should_quit = true;
                 return Effect::Quit;
@@ -519,7 +531,9 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             }
             if let Phase::Copying(cs) = &mut model.phase {
                 let five_secs = std::time::Duration::from_secs(5);
-                let cutoff = Instant::now().checked_sub(five_secs).unwrap_or(Instant::now());
+                let cutoff = Instant::now()
+                    .checked_sub(five_secs)
+                    .unwrap_or(Instant::now());
                 cs.speed_bytes.retain(|(t, _)| *t >= cutoff);
             }
             Effect::None
@@ -650,10 +664,8 @@ fn handle_copy(model: &mut Model, copy_msg: CopyMsg) -> Effect {
                 }
             }
             if is_destination {
-                model.phase = Phase::FatalError(format!(
-                    "Write error on {}: {error}",
-                    path.display()
-                ));
+                model.phase =
+                    Phase::FatalError(format!("Write error on {}: {error}", path.display()));
             }
             Effect::None
         }
@@ -903,11 +915,7 @@ fn apply_autocomplete(form: &mut SetupForm) {
         return;
     }
 
-    let selected = form
-        .dropdown
-        .entries
-        .get(form.dropdown.selected)
-        .cloned();
+    let selected = form.dropdown.entries.get(form.dropdown.selected).cloned();
 
     let Some(entry) = selected else { return };
 
@@ -980,9 +988,13 @@ fn update_setup(
             if form.dropdown.visible {
                 let max = form.dropdown.entries.len().saturating_sub(1);
                 form.dropdown.selected = (form.dropdown.selected.saturating_add(1)).min(max);
-                if form.dropdown.selected >= form.dropdown.scroll_offset.saturating_add(MAX_DROPDOWN) {
-                    form.dropdown.scroll_offset =
-                        form.dropdown.selected.saturating_sub(MAX_DROPDOWN.saturating_sub(1));
+                if form.dropdown.selected
+                    >= form.dropdown.scroll_offset.saturating_add(MAX_DROPDOWN)
+                {
+                    form.dropdown.scroll_offset = form
+                        .dropdown
+                        .selected
+                        .saturating_sub(MAX_DROPDOWN.saturating_sub(1));
                 }
             } else {
                 form.focused = form.focused.next();
@@ -1057,6 +1069,7 @@ fn update_setup(
             match form.focused {
                 SetupField::NoLive => form.no_live = !form.no_live,
                 SetupField::KeepNames => form.keep_names = !form.keep_names,
+                SetupField::Overwrite => form.overwrite = !form.overwrite,
                 _ => {}
             }
             Effect::None
@@ -1093,7 +1106,11 @@ fn validate_and_start(form: &mut SetupForm, locale: &Locale) -> Effect {
 
     let source = PathBuf::from(resolve_path_value(&form.source));
     if !source.is_dir() {
-        form.error = Some(format!("{}: {}", locale.err_source_not_dir, source.display()));
+        form.error = Some(format!(
+            "{}: {}",
+            locale.err_source_not_dir,
+            source.display()
+        ));
         form.focused = SetupField::Source;
         return Effect::None;
     }
@@ -1135,8 +1152,11 @@ fn validate_and_start(form: &mut SetupForm, locale: &Locale) -> Effect {
         Some(parse_ext_list(&form.exclude))
     };
 
-    let allowed_extensions =
-        crate::filters::resolve_extensions(include.as_ref(), exclude.as_ref(), crate::types::DEFAULT_EXTENSIONS);
+    let allowed_extensions = crate::filters::resolve_extensions(
+        include.as_ref(),
+        exclude.as_ref(),
+        crate::types::DEFAULT_EXTENSIONS,
+    );
 
     let config = Config {
         source,
@@ -1145,6 +1165,7 @@ fn validate_and_start(form: &mut SetupForm, locale: &Locale) -> Effect {
         min_file_size,
         no_live: form.no_live,
         keep_names: form.keep_names,
+        overwrite: form.overwrite,
         allowed_extensions,
     };
 
@@ -1169,7 +1190,11 @@ pub fn format_ext_list(s: &str) -> String {
     if parsed.is_empty() {
         return String::new();
     }
-    parsed.iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(", ")
+    parsed
+        .iter()
+        .map(|e| format!(".{e}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]
@@ -1260,6 +1285,7 @@ mod tests {
             min_file_size: None,
             no_live: false,
             keep_names: false,
+            overwrite: false,
             allowed_extensions: vec![],
         };
         let mut model = Model::new_cli(config, &i18n::EN);
@@ -1289,6 +1315,7 @@ mod tests {
             min_file_size: None,
             no_live: false,
             keep_names: false,
+            overwrite: false,
             allowed_extensions: vec![],
         };
         let mut model = Model::new_cli(config, &i18n::EN);
@@ -1312,6 +1339,7 @@ mod tests {
             min_file_size: None,
             no_live: false,
             keep_names: false,
+            overwrite: false,
             allowed_extensions: vec![],
         };
         let mut model = Model::new_cli(config, &i18n::EN);
@@ -1351,6 +1379,7 @@ mod tests {
             min_file_size: None,
             no_live: false,
             keep_names: false,
+            overwrite: false,
             allowed_extensions: vec![],
         };
         let mut model = Model::new_cli(config, &i18n::EN);
@@ -1373,6 +1402,7 @@ mod tests {
             min_file_size: None,
             no_live: false,
             keep_names: false,
+            overwrite: false,
             allowed_extensions: vec![],
         };
         let mut model = Model::new_cli(config, &i18n::EN);

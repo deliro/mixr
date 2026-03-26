@@ -1,14 +1,14 @@
 use std::io::{self, Write};
-use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::thread;
 
-use crate::app::{update, Effect, FileStatus, Model, Msg, Phase};
+use crate::app::{Effect, FileStatus, Model, Msg, Phase, update};
 use crate::copier;
 use crate::filters::FilterSet;
 use crate::i18n::Locale;
 use crate::scanner;
-use crate::types::{format_duration, ByteSize, Config, Error};
+use crate::types::{ByteSize, Config, Error, format_duration};
 
 #[allow(clippy::too_many_lines, clippy::unnecessary_wraps)]
 pub fn run(config: &Config, locale: &'static Locale) -> Result<bool, Error> {
@@ -73,6 +73,7 @@ pub fn run(config: &Config, locale: &'static Locale) -> Result<bool, Error> {
                 let shutdown = Arc::clone(&model.shutdown);
                 let destination = config.destination.clone();
                 let keep_names = config.keep_names;
+                let overwrite = config.overwrite;
                 let copy_tx = tx.clone();
                 thread::spawn(move || {
                     let (stx, srx) = mpsc::channel();
@@ -83,7 +84,14 @@ pub fn run(config: &Config, locale: &'static Locale) -> Result<bool, Error> {
                             }
                         }
                     });
-                    copier::copy_files(&files, &destination, keep_names, &stx, &shutdown);
+                    copier::copy_files(
+                        &files,
+                        &destination,
+                        keep_names,
+                        overwrite,
+                        &stx,
+                        &shutdown,
+                    );
                 });
             }
             Effect::Quit => break,
@@ -107,8 +115,7 @@ pub fn run(config: &Config, locale: &'static Locale) -> Result<bool, Error> {
             Phase::Copying(cs) => {
                 if let Some(cur) = cs.current() {
                     let idx = cs.current_index;
-                    if last_printed_index != Some(idx)
-                        && matches!(cur.status, FileStatus::Copying)
+                    if last_printed_index != Some(idx) && matches!(cur.status, FileStatus::Copying)
                     {
                         last_printed_index = Some(idx);
                         let _ = writeln!(
@@ -131,7 +138,12 @@ pub fn run(config: &Config, locale: &'static Locale) -> Result<bool, Error> {
                 elapsed,
             } => {
                 let _ = writeln!(stderr);
-                #[allow(clippy::cast_precision_loss, clippy::as_conversions, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                #[allow(
+                    clippy::cast_precision_loss,
+                    clippy::as_conversions,
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss
+                )]
                 let speed = if elapsed.as_secs_f64() > 0.0_f64 {
                     ByteSize((*total_bytes as f64 / elapsed.as_secs_f64()) as u64)
                 } else {

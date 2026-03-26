@@ -74,10 +74,7 @@ impl ByteSize {
 }
 
 impl fmt::Display for ByteSize {
-    #[allow(
-        clippy::cast_precision_loss,
-        clippy::as_conversions
-    )]
+    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let bytes = self.0;
         if bytes >= GB {
@@ -106,6 +103,7 @@ pub struct Config {
     pub min_file_size: Option<ByteSize>,
     pub no_live: bool,
     pub keep_names: bool,
+    pub overwrite: bool,
     pub allowed_extensions: Vec<String>,
 }
 
@@ -116,11 +114,26 @@ pub const DEFAULT_EXTENSIONS: &[&str] = &["mp3", "flac", "ogg", "wav", "m4a", "a
 pub enum Error {
     SourceNotFound(PathBuf),
     InvalidSize(ParseSizeError),
-    ScanFailed { path: PathBuf, source: std::io::Error },
-    ReadFailed { path: PathBuf, source: std::io::Error },
-    WriteFailed { path: PathBuf, source: std::io::Error },
-    CreateDirFailed { path: PathBuf, source: std::io::Error },
-    DiskSpaceQuery { path: PathBuf, source: std::io::Error },
+    ScanFailed {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    ReadFailed {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    WriteFailed {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    CreateDirFailed {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    DiskSpaceQuery {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     Terminal(std::io::Error),
 }
 
@@ -142,7 +155,11 @@ impl fmt::Display for Error {
                 write!(f, "failed to create {}: {source}", path.display())
             }
             Self::DiskSpaceQuery { path, source } => {
-                write!(f, "disk space query failed for {}: {source}", path.display())
+                write!(
+                    f,
+                    "disk space query failed for {}: {source}",
+                    path.display()
+                )
             }
             Self::Terminal(e) => write!(f, "terminal error: {e}"),
         }
@@ -176,7 +193,12 @@ mod tests {
     #[test]
     fn parse_gigabytes() {
         assert_eq!(ByteSize::parse("8G").unwrap(), ByteSize(8 * GB));
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss, clippy::as_conversions)]
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss,
+            clippy::as_conversions
+        )]
         let expected = (1.5_f64 * GB as f64) as u64;
         assert_eq!(ByteSize::parse("1.5GB").unwrap(), ByteSize(expected));
         assert_eq!(ByteSize::parse("8gb").unwrap(), ByteSize(8 * GB));
