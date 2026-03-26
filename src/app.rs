@@ -670,7 +670,15 @@ fn refresh_dropdown(form: &mut SetupForm) {
         }
     };
 
-    let value = expand_path(&raw_value);
+    let value = if raw_value.is_empty() {
+        let mut home = expand_path("~");
+        if !home.ends_with('/') {
+            home.push('/');
+        }
+        home
+    } else {
+        expand_path(&raw_value)
+    };
 
     let (parent, prefix) = if value.ends_with('/') || value.ends_with(std::path::MAIN_SEPARATOR) {
         (value.as_str(), "")
@@ -737,7 +745,15 @@ fn apply_autocomplete(form: &mut SetupForm) {
         _ => return,
     };
 
-    let value = expand_path(&raw_value);
+    let value = if raw_value.is_empty() {
+        let mut home = expand_path("~");
+        if !home.ends_with('/') {
+            home.push('/');
+        }
+        home
+    } else {
+        expand_path(&raw_value)
+    };
 
     let parent = if value.ends_with('/') || value.ends_with(std::path::MAIN_SEPARATOR) {
         value.clone()
@@ -845,7 +861,11 @@ fn update_setup(
         }
         KeyCode::Tab => {
             if form.focused.is_path() {
-                apply_autocomplete(form);
+                if !form.dropdown.visible {
+                    refresh_dropdown(form);
+                } else {
+                    apply_autocomplete(form);
+                }
             }
             Effect::None
         }
