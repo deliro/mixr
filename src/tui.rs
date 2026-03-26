@@ -11,8 +11,8 @@ use ratatui::widgets::{Block, Clear, Gauge, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::{
-    dest_existing_prefix_len, field_is_invalid, update, CopyState, Effect, FileStatus, Model, Msg,
-    Phase, ScanState, SetupField, SetupForm,
+    dest_existing_prefix_len, field_is_invalid, format_ext_list, update, CopyState, Effect,
+    FileStatus, Model, Msg, Phase, ScanState, SetupField, SetupForm,
 };
 use crate::copier;
 use crate::filters::FilterSet;
@@ -213,7 +213,11 @@ fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
 
         let mut spans = vec![Span::styled(format!("{label:<label_width$}"), label_style)];
 
-        if focused {
+        let dim = Style::default().fg(Color::DarkGray);
+
+        if value.is_empty() && !focused {
+            spans.push(Span::styled(field.placeholder(), dim));
+        } else if focused {
             let chars: Vec<char> = value.chars().collect();
             let cursor_pos = form.cursor.min(chars.len());
 
@@ -232,33 +236,51 @@ fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
                 }
             };
 
-            let mut run_start = 0;
-            while run_start < chars.len() {
-                if run_start == cursor_pos {
-                    spans.push(Span::styled(
-                        chars[cursor_pos].to_string(),
-                        Style::default().bg(Color::White).fg(Color::Black),
-                    ));
-                    run_start += 1;
-                    continue;
-                }
-                let style = style_for_char(run_start);
-                let mut run_end = run_start + 1;
-                while run_end < chars.len()
-                    && run_end != cursor_pos
-                    && style_for_char(run_end) == style
-                {
-                    run_end += 1;
-                }
-                let text: String = chars[run_start..run_end].iter().collect();
-                spans.push(Span::styled(text, style));
-                run_start = run_end;
-            }
-            if cursor_pos >= chars.len() {
+            if chars.is_empty() {
                 spans.push(Span::styled(
                     " ".to_string(),
                     Style::default().bg(Color::White).fg(Color::Black),
                 ));
+                spans.push(Span::styled(
+                    format!(" {}", field.placeholder()),
+                    dim,
+                ));
+            } else {
+                let mut run_start = 0;
+                while run_start < chars.len() {
+                    if run_start == cursor_pos {
+                        spans.push(Span::styled(
+                            chars[cursor_pos].to_string(),
+                            Style::default().bg(Color::White).fg(Color::Black),
+                        ));
+                        run_start += 1;
+                        continue;
+                    }
+                    let style = style_for_char(run_start);
+                    let mut run_end = run_start + 1;
+                    while run_end < chars.len()
+                        && run_end != cursor_pos
+                        && style_for_char(run_end) == style
+                    {
+                        run_end += 1;
+                    }
+                    let text: String = chars[run_start..run_end].iter().collect();
+                    spans.push(Span::styled(text, style));
+                    run_start = run_end;
+                }
+                if cursor_pos >= chars.len() {
+                    spans.push(Span::styled(
+                        " ".to_string(),
+                        Style::default().bg(Color::White).fg(Color::Black),
+                    ));
+                }
+            }
+
+            if field.is_ext() && !value.is_empty() {
+                let formatted = format_ext_list(value);
+                if !formatted.is_empty() {
+                    spans.push(Span::styled(format!("  \u{2192} {formatted}"), dim));
+                }
             }
         } else if let Some(split) = dest_split {
             if split >= value.len() {
@@ -274,6 +296,12 @@ fn view_setup(form: &SetupForm, frame: &mut Frame, area: Rect) {
             spans.push(Span::styled(value.to_string(), Style::default().fg(Color::Red)));
         } else {
             spans.push(Span::raw(value.to_string()));
+            if field.is_ext() && !value.is_empty() {
+                let formatted = format_ext_list(value);
+                if !formatted.is_empty() {
+                    spans.push(Span::styled(format!("  \u{2192} {formatted}"), dim));
+                }
+            }
         }
 
         frame.render_widget(Paragraph::new(Line::from(spans)), chunks[i]);

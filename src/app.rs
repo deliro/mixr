@@ -71,6 +71,22 @@ impl SetupField {
     pub fn is_path(self) -> bool {
         matches!(self, Self::Source | Self::Destination)
     }
+
+    pub fn is_ext(self) -> bool {
+        matches!(self, Self::Extensions | Self::Exclude)
+    }
+
+    pub fn placeholder(self) -> &'static str {
+        match self {
+            Self::Source => "~/Music",
+            Self::Destination => "Ctrl+D for drives",
+            Self::Size => "auto (free space)",
+            Self::MinSize => "e.g. 1M",
+            Self::Extensions => "mp3, flac, ogg, ...",
+            Self::Exclude => "e.g. wav, wma",
+            _ => "",
+        }
+    }
 }
 
 pub const MAX_DROPDOWN: usize = 8;
@@ -725,32 +741,63 @@ pub fn dest_existing_prefix_len(value: &str) -> usize {
     0
 }
 
-fn volumes_path() -> Option<String> {
+fn navigate_to_volumes(form: &mut SetupForm) {
     #[cfg(target_os = "macos")]
-    {
-        Some("/Volumes/".to_string())
-    }
+    let base = Some("/Volumes/".to_string());
     #[cfg(target_os = "linux")]
-    {
+    let base = {
+        let mut result = None;
         if let Ok(user) = std::env::var("USER") {
             let media = format!("/media/{user}/");
             if std::path::Path::new(&media).is_dir() {
-                return Some(media);
-            }
-            let run_media = format!("/run/media/{user}/");
-            if std::path::Path::new(&run_media).is_dir() {
-                return Some(run_media);
+                result = Some(media);
+            } else {
+                let run_media = format!("/run/media/{user}/");
+                if std::path::Path::new(&run_media).is_dir() {
+                    result = Some(run_media);
+                }
             }
         }
-        if std::path::Path::new("/mnt/").is_dir() {
-            Some("/mnt/".to_string())
-        } else {
-            None
+        if result.is_none() && std::path::Path::new("/mnt/").is_dir() {
+            result = Some("/mnt/".to_string());
         }
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    {
+        result
+    };
+    #[cfg(windows)]
+    let base: Option<String> = {
+        let mut drives: Vec<String> = Vec::new();
+        for letter in b'A'..=b'Z' {
+            let drive = format!("{}:\\", letter as char);
+            if std::path::Path::new(&drive).exists() {
+                drives.push(format!("{}:/", letter as char));
+            }
+        }
+        if !drives.is_empty() {
+            match form.focused {
+                SetupField::Source => form.source.clear(),
+                SetupField::Destination => form.destination.clear(),
+                _ => {}
+            }
+            form.cursor = 0;
+            form.dropdown.entries = drives;
+            form.dropdown.visible = true;
+            form.dropdown.selected = 0;
+            form.dropdown.scroll_offset = 0;
+            return;
+        }
         None
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+    let base: Option<String> = None;
+
+    if let Some(path) = base {
+        match form.focused {
+            SetupField::Source => form.source = path.clone(),
+            SetupField::Destination => form.destination = path.clone(),
+            _ => {}
+        }
+        form.cursor = path.chars().count();
+        refresh_dropdown(form);
     }
 }
 
@@ -961,15 +1008,7 @@ fn update_setup(
             Effect::None
         }
         KeyCode::Char('d') if ctrl && form.focused.is_path() => {
-            if let Some(vp) = volumes_path() {
-                match form.focused {
-                    SetupField::Source => form.source = vp.clone(),
-                    SetupField::Destination => form.destination = vp.clone(),
-                    _ => {}
-                }
-                form.cursor = vp.chars().count();
-                refresh_dropdown(form);
-            }
+            navigate_to_volumes(form);
             Effect::None
         }
         KeyCode::Tab => {
@@ -1070,12 +1109,12 @@ fn validate_and_start(form: &mut SetupForm) -> Effect {
     let include = if form.extensions.is_empty() {
         None
     } else {
-        Some(parse_comma_list(&form.extensions))
+        Some(parse_ext_list(&form.extensions))
     };
     let exclude = if form.exclude.is_empty() {
         None
     } else {
-        Some(parse_comma_list(&form.exclude))
+        Some(parse_ext_list(&form.exclude))
     };
 
     let allowed_extensions =
@@ -1094,11 +1133,25 @@ fn validate_and_start(form: &mut SetupForm) -> Effect {
     Effect::StartScan(config)
 }
 
-fn parse_comma_list(s: &str) -> Vec<String> {
-    s.split(',')
-        .map(|p| p.trim().to_lowercase().trim_start_matches('.').to_string())
+pub fn parse_ext_list(s: &str) -> Vec<String> {
+    s.split([',', ' '])
+        .map(|p| {
+            p.trim()
+                .to_lowercase()
+                .trim_start_matches('*')
+                .trim_start_matches('.')
+                .to_string()
+        })
         .filter(|p| !p.is_empty())
         .collect()
+}
+
+pub fn format_ext_list(s: &str) -> String {
+    let parsed = parse_ext_list(s);
+    if parsed.is_empty() {
+        return String::new();
+    }
+    parsed.iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(", ")
 }
 
 #[cfg(test)]
