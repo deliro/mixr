@@ -731,11 +731,13 @@ fn apply_autocomplete(form: &mut SetupForm) {
 
     let Some(entry) = selected else { return };
 
-    let value = match form.focused {
-        SetupField::Source => &form.source,
-        SetupField::Destination => &form.destination,
+    let raw_value = match form.focused {
+        SetupField::Source => form.source.clone(),
+        SetupField::Destination => form.destination.clone(),
         _ => return,
     };
+
+    let value = expand_path(&raw_value);
 
     let parent = if value.ends_with('/') || value.ends_with(std::path::MAIN_SEPARATOR) {
         value.clone()
