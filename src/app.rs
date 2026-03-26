@@ -647,11 +647,28 @@ pub fn field_is_invalid(field: SetupField, value: &str) -> bool {
     match field {
         SetupField::Size | SetupField::MinSize => ByteSize::parse(value).is_err(),
         SetupField::Source | SetupField::Destination => {
-            let expanded = expand_path(value);
-            let path = std::path::Path::new(&expanded);
-            !path.is_dir()
+            let resolved = resolve_path_value(value);
+            !std::path::Path::new(&resolved).is_dir()
         }
         _ => false,
+    }
+}
+
+fn resolve_path_value(raw: &str) -> String {
+    if raw.is_empty() {
+        let mut h = expand_path("~");
+        if !h.ends_with('/') {
+            h.push('/');
+        }
+        h
+    } else if raw.starts_with('/') || raw.starts_with('~') {
+        expand_path(raw)
+    } else {
+        let mut h = expand_path("~");
+        if !h.ends_with('/') {
+            h.push('/');
+        }
+        format!("{h}{raw}")
     }
 }
 
@@ -670,15 +687,7 @@ fn refresh_dropdown(form: &mut SetupForm) {
         }
     };
 
-    let value = if raw_value.is_empty() {
-        let mut home = expand_path("~");
-        if !home.ends_with('/') {
-            home.push('/');
-        }
-        home
-    } else {
-        expand_path(&raw_value)
-    };
+    let value = resolve_path_value(&raw_value);
 
     let (parent, prefix) = if value.ends_with('/') || value.ends_with(std::path::MAIN_SEPARATOR) {
         (value.as_str(), "")
@@ -745,15 +754,7 @@ fn apply_autocomplete(form: &mut SetupForm) {
         _ => return,
     };
 
-    let value = if raw_value.is_empty() {
-        let mut home = expand_path("~");
-        if !home.ends_with('/') {
-            home.push('/');
-        }
-        home
-    } else {
-        expand_path(&raw_value)
-    };
+    let value = resolve_path_value(&raw_value);
 
     let parent = if value.ends_with('/') || value.ends_with(std::path::MAIN_SEPARATOR) {
         value.clone()
@@ -921,7 +922,7 @@ fn validate_and_start(form: &mut SetupForm) -> Effect {
         return Effect::None;
     }
 
-    let source = PathBuf::from(expand_path(&form.source));
+    let source = PathBuf::from(resolve_path_value(&form.source));
     if !source.is_dir() {
         form.error = Some(format!("Source is not a directory: {}", source.display()));
         form.focused = SetupField::Source;
@@ -970,7 +971,7 @@ fn validate_and_start(form: &mut SetupForm) -> Effect {
 
     let config = Config {
         source,
-        destination: PathBuf::from(expand_path(&form.destination)),
+        destination: PathBuf::from(resolve_path_value(&form.destination)),
         max_size,
         min_file_size,
         no_live: form.no_live,
