@@ -3,7 +3,7 @@ set -eu
 
 REPO="deliro/mixr"
 BINARY="mixr"
-INSTALL_DIR="${MIXR_INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR="${MIXR_INSTALL_DIR:-${HOME}/.local/bin}"
 
 die() {
     printf "error: %s\n" "$1" >&2
@@ -116,13 +116,14 @@ main() {
 
 install_binary() {
     srcdir="$1"
-    if [ -w "$INSTALL_DIR" ]; then
-        install -m 755 "${srcdir}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
-    else
-        printf "installing to %s (requires sudo)\n" "$INSTALL_DIR"
-        sudo install -m 755 "${srcdir}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
-    fi
+    mkdir -p "$INSTALL_DIR"
+    install -m 755 "${srcdir}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
     printf "%s installed to %s/%s\n" "$BINARY" "$INSTALL_DIR" "$BINARY"
+
+    case ":${PATH}:" in
+        *":${INSTALL_DIR}:"*) ;;
+        *) printf "WARNING: %s is not in PATH — add it to your shell profile:\n  export PATH=\"%s:\$PATH\"\n" "$INSTALL_DIR" "$INSTALL_DIR" ;;
+    esac
 }
 
 main
