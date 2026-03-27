@@ -52,9 +52,36 @@ download() {
     fi
 }
 
+confirm_update() {
+    current="$1"
+    latest="$2"
+    printf "%s is already installed (current: %s, latest: %s)\n" "$BINARY" "$current" "$latest"
+    printf "update? [y/N] "
+    read -r answer
+    case "$answer" in
+        y|Y|yes|Yes) return 0 ;;
+        *) printf "cancelled\n"; exit 0 ;;
+    esac
+}
+
+strip_v() {
+    echo "$1" | sed 's/^v//'
+}
+
 main() {
     target="$(detect_target)"
     tag="$(fetch_latest_tag)"
+    latest="$(strip_v "$tag")"
+
+    if command -v "$BINARY" > /dev/null 2>&1; then
+        current="$("$BINARY" --version 2>/dev/null | awk '{print $2}')"
+        if [ "$current" = "$latest" ]; then
+            printf "%s %s is already up to date\n" "$BINARY" "$current"
+            exit 0
+        fi
+        confirm_update "$current" "$latest"
+    fi
+
     archive="${BINARY}-${target}.tar.gz"
     url="https://github.com/${REPO}/releases/download/${tag}/${archive}"
     checksum_url="${url}.sha256"

@@ -16,6 +16,24 @@ function Get-LatestTag {
 
 function Main {
     $tag = Get-LatestTag
+    $latest = $tag -replace '^v', ''
+
+    $existingPath = Get-Command $Binary -ErrorAction SilentlyContinue
+    if ($existingPath) {
+        $versionOutput = & $Binary --version 2>$null
+        $current = ($versionOutput -split '\s+')[1]
+        if ($current -eq $latest) {
+            Write-Host "$Binary $current is already up to date"
+            return
+        }
+        Write-Host "$Binary is already installed (current: $current, latest: $latest)"
+        $answer = Read-Host "update? [y/N]"
+        if ($answer -notin @("y", "Y", "yes", "Yes")) {
+            Write-Host "cancelled"
+            return
+        }
+    }
+
     $archive = "$Binary-$Target.zip"
     $url = "https://github.com/$Repo/releases/download/$tag/$archive"
     $checksumUrl = "$url.sha256"
