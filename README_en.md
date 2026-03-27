@@ -8,9 +8,27 @@ mixr scans a given directory, randomly selects audio files within a size budget,
 
 ## Installation
 
+### macOS / Linux
+
+```bash
+curl -sSf https://raw.githubusercontent.com/deliro/mixr/master/scripts/install.sh | sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/deliro/mixr/master/scripts/install.ps1 | iex
+```
+
+### From source
+
 ```bash
 cargo install --path .
 ```
+
+### From GitHub Release
+
+Download the binary for your platform from the [releases page](https://github.com/deliro/mixr/releases).
 
 ## Usage
 

@@ -8,9 +8,27 @@ mixr сканирует указанную папку, случайным обр
 
 ## Установка
 
+### macOS / Linux
+
+```bash
+curl -sSf https://raw.githubusercontent.com/deliro/mixr/master/scripts/install.sh | sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/deliro/mixr/master/scripts/install.ps1 | iex
+```
+
+### Из исходников
+
 ```bash
 cargo install --path .
 ```
+
+### Из GitHub Release
+
+Скачайте бинарник для вашей платформы со [страницы релизов](https://github.com/deliro/mixr/releases).
 
 ## Использование
 
