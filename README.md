@@ -23,7 +23,7 @@ irm https://raw.githubusercontent.com/deliro/mixr/master/scripts/install.ps1 | i
 ### Из исходников
 
 ```bash
-cargo install --path .
+cargo install --git https://github.com/deliro/mixr
 ```
 
 ### Из GitHub Release
