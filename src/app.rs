@@ -1081,6 +1081,13 @@ fn update_setup(
             }
             Effect::None
         }
+        KeyCode::Backspace if alt && form.focused.is_text() => {
+            form.delete_word_before_cursor();
+            if form.focused.is_path() {
+                refresh_dropdown(form);
+            }
+            Effect::None
+        }
         KeyCode::Backspace if form.focused.is_text() => {
             form.delete_char_before_cursor();
             if form.focused.is_path() {
