@@ -682,6 +682,7 @@ fn handle_copy(model: &mut Model, copy_msg: CopyMsg) -> Effect {
             };
             Effect::None
         }
+        CopyMsg::Preparing { .. } => Effect::None,
         CopyMsg::Aborted => {
             model.should_quit = true;
             Effect::Quit
