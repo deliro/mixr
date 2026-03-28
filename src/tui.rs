@@ -265,37 +265,31 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
                 ));
                 spans.push(Span::styled(format!(" {}", field.placeholder(locale)), dim));
             } else {
-                let mut run_start = 0_usize;
-                while run_start < chars.len() {
-                    if run_start == cursor_pos {
-                        if let Some(ch) = chars.get(cursor_pos) {
-                            spans.push(Span::styled(
-                                ch.to_string(),
-                                Style::default().bg(Color::White).fg(Color::Black),
-                            ));
+                let cursor_style = Style::default().bg(Color::White).fg(Color::Black);
+                let mut run = String::new();
+                let mut run_style = style_for_char(0_usize);
+
+                for (i, &ch) in chars.iter().enumerate() {
+                    if i == cursor_pos {
+                        if !run.is_empty() {
+                            spans.push(Span::styled(std::mem::take(&mut run), run_style));
                         }
-                        run_start = run_start.saturating_add(1);
+                        spans.push(Span::styled(ch.to_string(), cursor_style));
+                        run_style = style_for_char(i.saturating_add(1));
                         continue;
                     }
-                    let style = style_for_char(run_start);
-                    let mut run_end = run_start.saturating_add(1);
-                    while run_end < chars.len()
-                        && run_end != cursor_pos
-                        && style_for_char(run_end) == style
-                    {
-                        run_end = run_end.saturating_add(1);
+                    let style = style_for_char(i);
+                    if style != run_style && !run.is_empty() {
+                        spans.push(Span::styled(std::mem::take(&mut run), run_style));
+                        run_style = style;
                     }
-                    let text: String = chars
-                        .get(run_start..run_end)
-                        .map_or_else(String::new, |s| s.iter().collect());
-                    spans.push(Span::styled(text, style));
-                    run_start = run_end;
+                    run.push(ch);
+                }
+                if !run.is_empty() {
+                    spans.push(Span::styled(run, run_style));
                 }
                 if cursor_pos >= chars.len() {
-                    spans.push(Span::styled(
-                        " ".to_string(),
-                        Style::default().bg(Color::White).fg(Color::Black),
-                    ));
+                    spans.push(Span::styled(" ".to_string(), cursor_style));
                 }
             }
 
@@ -624,16 +618,15 @@ fn render_file_list(cs: &CopyState, frame: &mut Frame, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
     let upcoming: Vec<_> = cs.upcoming().collect();
-    for row in (0_usize..MAX_UPCOMING).rev() {
-        if let Some(item) = upcoming.get(row) {
-            lines.push(Line::from(Span::styled(
-                format!("  {}", item.name),
-                Style::default().fg(Color::DarkGray),
-            )));
-        } else {
-            lines.push(Line::from(""));
-        }
-    }
+    lines.extend(
+        std::iter::repeat_with(|| Line::from("")).take(MAX_UPCOMING.saturating_sub(upcoming.len())),
+    );
+    lines.extend(upcoming.iter().rev().map(|item| {
+        Line::from(Span::styled(
+            format!("  {}", item.name),
+            Style::default().fg(Color::DarkGray),
+        ))
+    }));
 
     if let Some(cur) = cs.current() {
         lines.push(Line::from(Span::styled(
@@ -647,24 +640,22 @@ fn render_file_list(cs: &CopyState, frame: &mut Frame, area: Rect) {
     }
 
     let history: Vec<_> = cs.history().collect();
-    for row in 0_usize..MAX_HISTORY {
-        if let Some(item) = history.get(row) {
-            let style = match item.status {
-                FileStatus::Done => {
-                    let color = HISTORY_GREENS
-                        .get(row)
-                        .copied()
-                        .unwrap_or(Color::Rgb(0, 80, 0));
-                    Style::default().fg(color)
-                }
-                FileStatus::Failed => Style::default().fg(Color::Red),
-                _ => Style::default(),
-            };
-            lines.push(Line::from(Span::styled(format!("  {}", item.name), style)));
-        } else {
-            lines.push(Line::from(""));
-        }
-    }
+    lines.extend(
+        history
+            .iter()
+            .zip(HISTORY_GREENS.iter())
+            .map(|(item, &color)| {
+                let style = match item.status {
+                    FileStatus::Done => Style::default().fg(color),
+                    FileStatus::Failed => Style::default().fg(Color::Red),
+                    _ => Style::default(),
+                };
+                Line::from(Span::styled(format!("  {}", item.name), style))
+            }),
+    );
+    lines.extend(
+        std::iter::repeat_with(|| Line::from("")).take(MAX_HISTORY.saturating_sub(history.len())),
+    );
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, area);
@@ -706,12 +697,12 @@ fn view_done(
             format!("{} {}:", errors.len(), locale.errors),
             Style::default().fg(Color::Red),
         )));
-        for err in errors.iter().take(10_usize) {
-            lines.push(Line::from(Span::styled(
+        lines.extend(errors.iter().take(10_usize).map(|err| {
+            Line::from(Span::styled(
                 format!("  {err}"),
                 Style::default().fg(Color::Red),
-            )));
-        }
+            ))
+        }));
     }
 
     lines.push(Line::from(""));
