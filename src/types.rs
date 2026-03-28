@@ -1,5 +1,6 @@
 use std::fmt;
 use std::path::PathBuf;
+use std::time::Duration;
 
 const KB: u64 = 1024;
 const MB: u64 = 1024 * KB;
@@ -174,7 +175,7 @@ impl From<ParseSizeError> for Error {
     }
 }
 
-pub fn format_duration(d: std::time::Duration) -> String {
+pub fn format_duration(d: Duration) -> String {
     let secs = d.as_secs();
     let h = secs / 3600_u64;
     let m = (secs % 3600_u64) / 60_u64;
@@ -184,6 +185,71 @@ pub fn format_duration(d: std::time::Duration) -> String {
     } else {
         format!("{m:02}:{s:02}")
     }
+}
+
+#[derive(Debug, PartialEq)]
+#[allow(dead_code)]
+pub enum ParseDurationError {
+    Empty,
+    Invalid(String),
+    Zero,
+}
+
+impl fmt::Display for ParseDurationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => write!(f, "duration string is empty"),
+            Self::Invalid(s) => write!(f, "invalid duration: {s}"),
+            Self::Zero => write!(f, "duration must be greater than zero"),
+        }
+    }
+}
+
+impl std::error::Error for ParseDurationError {}
+
+#[allow(dead_code)]
+pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(ParseDurationError::Empty);
+    }
+
+    let total_secs = if let Some((min_str, sec_str)) = s.split_once(':') {
+        let mins = min_str
+            .parse::<u64>()
+            .map_err(|_| ParseDurationError::Invalid(s.to_string()))?;
+        let secs = sec_str
+            .parse::<u64>()
+            .map_err(|_| ParseDurationError::Invalid(s.to_string()))?;
+        mins.saturating_mul(60).saturating_add(secs)
+    } else if let Some(idx) = s.find('m') {
+        let min_str = s
+            .get(..idx)
+            .ok_or_else(|| ParseDurationError::Invalid(s.to_string()))?;
+        let rest = s.get(idx.saturating_add(1)..).unwrap_or("");
+        let rest = rest.strip_suffix('s').unwrap_or(rest);
+        let mins = min_str
+            .parse::<u64>()
+            .map_err(|_| ParseDurationError::Invalid(s.to_string()))?;
+        let secs = if rest.is_empty() {
+            0_u64
+        } else {
+            rest.parse::<u64>()
+                .map_err(|_| ParseDurationError::Invalid(s.to_string()))?
+        };
+        mins.saturating_mul(60).saturating_add(secs)
+    } else {
+        let num_str = s.strip_suffix('s').unwrap_or(s);
+        num_str
+            .parse::<u64>()
+            .map_err(|_| ParseDurationError::Invalid(s.to_string()))?
+    };
+
+    if total_secs == 0 {
+        return Err(ParseDurationError::Zero);
+    }
+
+    Ok(Duration::from_secs(total_secs))
 }
 
 #[cfg(test)]
@@ -237,5 +303,33 @@ mod tests {
         assert_eq!(format!("{}", ByteSize(500 * MB)), "500.0M");
         assert_eq!(format!("{}", ByteSize(900 * KB)), "900.0K");
         assert_eq!(format!("{}", ByteSize(512)), "512B");
+    }
+
+    #[test]
+    fn parse_duration_bare_seconds() {
+        assert_eq!(parse_duration("30").unwrap().as_secs(), 30);
+        assert_eq!(parse_duration("120").unwrap().as_secs(), 120);
+    }
+
+    #[test]
+    fn parse_duration_with_suffix() {
+        assert_eq!(parse_duration("30s").unwrap().as_secs(), 30);
+        assert_eq!(parse_duration("2m").unwrap().as_secs(), 120);
+        assert_eq!(parse_duration("2m30s").unwrap().as_secs(), 150);
+    }
+
+    #[test]
+    fn parse_duration_colon_format() {
+        assert_eq!(parse_duration("2:30").unwrap().as_secs(), 150);
+        assert_eq!(parse_duration("0:45").unwrap().as_secs(), 45);
+        assert_eq!(parse_duration("10:00").unwrap().as_secs(), 600);
+    }
+
+    #[test]
+    fn parse_duration_errors() {
+        assert!(parse_duration("").is_err());
+        assert!(parse_duration("abc").is_err());
+        assert!(parse_duration("0").is_err());
+        assert!(parse_duration("-5").is_err());
     }
 }
