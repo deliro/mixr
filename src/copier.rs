@@ -1,15 +1,23 @@
 use std::fs;
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::mpsc::Sender;
+use std::thread;
 
 use crate::types::{ByteSize, FileEntry};
 
-const BUF_SIZE: usize = 64 * 1024;
+const BUF_SIZE: usize = 1024 * 1024;
+const PIPE_CAPACITY: usize = 4_usize;
 
+#[allow(dead_code)]
 pub enum CopyMsg {
+    Preparing {
+        index: usize,
+        converting: bool,
+    },
     FileStart {
         index: usize,
         name: String,
@@ -32,6 +40,31 @@ pub enum CopyMsg {
     Aborted,
 }
 
+enum PipeMsg {
+    Preparing {
+        index: usize,
+        converting: bool,
+    },
+    StartFile {
+        index: usize,
+        dest_path: PathBuf,
+        name: String,
+        original_path: PathBuf,
+        size: ByteSize,
+    },
+    Chunk(Vec<u8>),
+    EndFile {
+        index: usize,
+    },
+    SkipFile {
+        index: usize,
+        path: PathBuf,
+        error: String,
+    },
+    Done,
+    Abort,
+}
+
 pub fn copy_files(
     files: &[FileEntry],
     destination: &Path,
@@ -50,12 +83,48 @@ pub fn copy_files(
         return;
     }
 
+    let (pipe_tx, pipe_rx) = mpsc::sync_channel::<PipeMsg>(PIPE_CAPACITY);
+
+    let progress_tx = tx.clone();
+    let writer_shutdown = Arc::clone(shutdown);
+
+    let writer_handle = thread::spawn(move || {
+        writer_thread(pipe_rx, &progress_tx, &writer_shutdown);
+    });
+
+    reader_thread(
+        files,
+        destination,
+        keep_names,
+        overwrite,
+        &pipe_tx,
+        shutdown,
+    );
+
+    drop(pipe_tx);
+    let _ = writer_handle.join();
+}
+
+fn reader_thread(
+    files: &[FileEntry],
+    destination: &Path,
+    keep_names: bool,
+    overwrite: bool,
+    pipe_tx: &mpsc::SyncSender<PipeMsg>,
+    shutdown: &Arc<AtomicBool>,
+) {
     let mut counter = 1_usize;
+
     for (index, entry) in files.iter().enumerate() {
-        if shutdown.load(Ordering::Acquire) {
-            let _ = tx.send(CopyMsg::Aborted);
+        if shutdown.load(Ordering::Relaxed) {
+            let _ = pipe_tx.send(PipeMsg::Abort);
             return;
         }
+
+        let _ = pipe_tx.send(PipeMsg::Preparing {
+            index,
+            converting: false,
+        });
 
         let dest_path = if keep_names {
             if overwrite {
@@ -81,78 +150,219 @@ pub fn copy_files(
             .unwrap_or("unknown")
             .to_string();
 
-        let _ = tx.send(CopyMsg::FileStart {
+        let src_file = match fs::File::open(&entry.path) {
+            Ok(f) => f,
+            Err(e) => {
+                let _ = pipe_tx.send(PipeMsg::SkipFile {
+                    index,
+                    path: entry.path.clone(),
+                    error: e.to_string(),
+                });
+                continue;
+            }
+        };
+
+        let _ = pipe_tx.send(PipeMsg::StartFile {
             index,
+            dest_path,
             name,
             original_path: entry.path.clone(),
             size: entry.size,
         });
 
-        match copy_single(&entry.path, &dest_path, tx, shutdown) {
-            Ok(()) => {
-                let _ = tx.send(CopyMsg::FileDone { index });
-            }
-            Err((error, is_destination)) => {
-                if is_destination {
-                    let _ = cleanup_partial(&dest_path);
-                }
-                let _ = tx.send(CopyMsg::Error {
-                    index,
-                    path: entry.path.clone(),
-                    error: error.to_string(),
-                    is_destination,
-                });
-                if is_destination {
-                    return;
-                }
-            }
+        if !read_file_chunks(src_file, index, &entry.path, pipe_tx) {
+            continue;
         }
+
+        let _ = pipe_tx.send(PipeMsg::EndFile { index });
     }
 
-    let _ = tx.send(CopyMsg::Complete);
+    let _ = pipe_tx.send(PipeMsg::Done);
 }
 
-fn copy_single(
-    source: &Path,
-    dest: &Path,
-    tx: &Sender<CopyMsg>,
-    shutdown: &Arc<AtomicBool>,
-) -> Result<(), (io::Error, bool)> {
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent).map_err(|e| (e, true))?;
+fn read_file_chunks(
+    mut src_file: fs::File,
+    index: usize,
+    path: &Path,
+    pipe_tx: &mpsc::SyncSender<PipeMsg>,
+) -> bool {
+    let mut buf = vec![0_u8; BUF_SIZE];
+    loop {
+        match src_file.read(&mut buf) {
+            Ok(0_usize) => return true,
+            Ok(n) => {
+                let chunk = buf.get(..n).unwrap_or(&buf).to_vec();
+                if pipe_tx.send(PipeMsg::Chunk(chunk)).is_err() {
+                    return false;
+                }
+            }
+            Err(e) => {
+                let _ = pipe_tx.send(PipeMsg::SkipFile {
+                    index,
+                    path: path.to_path_buf(),
+                    error: e.to_string(),
+                });
+                return false;
+            }
+        }
+    }
+}
+
+struct WriterState<'a> {
+    writer: Option<BufWriter<fs::File>>,
+    current_dest: Option<PathBuf>,
+    progress_tx: &'a Sender<CopyMsg>,
+    shutdown: &'a Arc<AtomicBool>,
+}
+
+impl<'a> WriterState<'a> {
+    fn new(progress_tx: &'a Sender<CopyMsg>, shutdown: &'a Arc<AtomicBool>) -> Self {
+        Self {
+            writer: None,
+            current_dest: None,
+            progress_tx,
+            shutdown,
+        }
     }
 
-    let src_file = fs::File::open(source).map_err(|e| (e, false))?;
-    let dest_file = fs::File::create(dest).map_err(|e| (e, true))?;
+    fn fatal_dest_error(&mut self, index: usize, path: PathBuf, error: String) {
+        let _ = self.progress_tx.send(CopyMsg::Error {
+            index,
+            path,
+            error,
+            is_destination: true,
+        });
+        self.shutdown.store(true, Ordering::Relaxed);
+    }
 
-    let mut reader = BufReader::with_capacity(BUF_SIZE, src_file);
-    let mut writer = BufWriter::with_capacity(BUF_SIZE, dest_file);
-    let mut buf = vec![0_u8; BUF_SIZE];
-
-    loop {
-        if shutdown.load(Ordering::Acquire) {
-            drop(writer);
-            let _ = cleanup_partial(dest);
-            return Err((io::Error::new(io::ErrorKind::Interrupted, "shutdown"), true));
+    fn handle_start(
+        &mut self,
+        index: usize,
+        dest_path: PathBuf,
+        name: String,
+        original_path: PathBuf,
+        size: ByteSize,
+    ) -> bool {
+        if let Some(parent) = dest_path.parent()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            self.fatal_dest_error(index, dest_path, e.to_string());
+            return false;
         }
 
-        let bytes_read = reader.read(&mut buf).map_err(|e| (e, false))?;
-        if bytes_read == 0_usize {
-            break;
+        match fs::File::create(&dest_path) {
+            Ok(f) => {
+                self.writer = Some(BufWriter::with_capacity(BUF_SIZE, f));
+                self.current_dest = Some(dest_path);
+                let _ = self.progress_tx.send(CopyMsg::FileStart {
+                    index,
+                    name,
+                    original_path,
+                    size,
+                });
+                true
+            }
+            Err(e) => {
+                self.fatal_dest_error(index, dest_path, e.to_string());
+                false
+            }
         }
+    }
 
-        writer
-            .write_all(buf.get(..bytes_read).unwrap_or(&buf))
-            .map_err(|e| (e, true))?;
-        #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-        let written = bytes_read as u64;
-        let _ = tx.send(CopyMsg::Progress {
-            bytes_written: written,
+    fn handle_chunk(&mut self, data: &[u8]) -> bool {
+        if let Some(ref mut w) = self.writer {
+            if let Err(e) = w.write_all(data) {
+                if let Some(dest) = self.current_dest.take() {
+                    let _ = cleanup_partial(&dest);
+                    self.fatal_dest_error(0_usize, dest, e.to_string());
+                }
+                return false;
+            }
+            #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+            let written = data.len() as u64;
+            let _ = self.progress_tx.send(CopyMsg::Progress {
+                bytes_written: written,
+            });
+        }
+        true
+    }
+
+    fn handle_end(&mut self, index: usize) -> bool {
+        if let Some(mut w) = self.writer.take()
+            && let Err(e) = w.flush()
+        {
+            if let Some(dest) = self.current_dest.take() {
+                let _ = cleanup_partial(&dest);
+                self.fatal_dest_error(index, dest, e.to_string());
+            }
+            return false;
+        }
+        self.current_dest = None;
+        let _ = self.progress_tx.send(CopyMsg::FileDone { index });
+        true
+    }
+
+    fn handle_skip(&mut self, index: usize, path: PathBuf, error: String) {
+        self.writer = None;
+        if let Some(dest) = self.current_dest.take() {
+            let _ = cleanup_partial(&dest);
+        }
+        let _ = self.progress_tx.send(CopyMsg::Error {
+            index,
+            path,
+            error,
+            is_destination: false,
         });
     }
+}
 
-    writer.flush().map_err(|e| (e, true))?;
-    Ok(())
+#[allow(clippy::needless_pass_by_value)]
+fn writer_thread(
+    pipe_rx: mpsc::Receiver<PipeMsg>,
+    progress_tx: &Sender<CopyMsg>,
+    shutdown: &Arc<AtomicBool>,
+) {
+    let mut state = WriterState::new(progress_tx, shutdown);
+
+    for msg in &pipe_rx {
+        match msg {
+            PipeMsg::Preparing { index, converting } => {
+                let _ = progress_tx.send(CopyMsg::Preparing { index, converting });
+            }
+            PipeMsg::StartFile {
+                index,
+                dest_path,
+                name,
+                original_path,
+                size,
+            } => {
+                if !state.handle_start(index, dest_path, name, original_path, size) {
+                    break;
+                }
+            }
+            PipeMsg::Chunk(data) => {
+                if !state.handle_chunk(&data) {
+                    break;
+                }
+            }
+            PipeMsg::EndFile { index } => {
+                if !state.handle_end(index) {
+                    break;
+                }
+            }
+            PipeMsg::SkipFile { index, path, error } => {
+                state.handle_skip(index, path, error);
+            }
+            PipeMsg::Done => {
+                let _ = progress_tx.send(CopyMsg::Complete);
+                break;
+            }
+            PipeMsg::Abort => {
+                let _ = progress_tx.send(CopyMsg::Aborted);
+                break;
+            }
+        }
+    }
 }
 
 fn dest_path_numbered(
