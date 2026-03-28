@@ -57,7 +57,7 @@ pub fn scan(
         };
         let size = meta.len();
 
-        let matched = filters.matches(&path, size);
+        let matched = filters.matches(&path, size, None);
         let _ = tx.send(ScanMsg::FileFound {
             path: path.clone(),
             matched,
@@ -129,7 +129,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         create_test_tree(dir.path());
 
-        let filters = FilterSet::new(vec!["mp3".to_string(), "flac".to_string()], None, false);
+        let filters = FilterSet::new(
+            vec!["mp3".to_string(), "flac".to_string()],
+            None,
+            None,
+            false,
+        );
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
         scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
@@ -149,7 +154,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         create_test_tree(dir.path());
 
-        let filters = FilterSet::new(vec!["mp3".to_string(), "flac".to_string()], None, true);
+        let filters = FilterSet::new(
+            vec!["mp3".to_string(), "flac".to_string()],
+            None,
+            None,
+            true,
+        );
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
         scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
@@ -174,7 +184,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         create_test_tree(dir.path());
 
-        let filters = FilterSet::new(vec!["mp3".to_string()], Some(ByteSize(1000)), false);
+        let filters = FilterSet::new(vec!["mp3".to_string()], Some(ByteSize(1000)), None, false);
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
         scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
