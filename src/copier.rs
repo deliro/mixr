@@ -52,7 +52,7 @@ pub fn copy_files(
 
     let mut counter = 1_usize;
     for (index, entry) in files.iter().enumerate() {
-        if shutdown.load(Ordering::Relaxed) {
+        if shutdown.load(Ordering::Acquire) {
             let _ = tx.send(CopyMsg::Aborted);
             return;
         }
@@ -130,7 +130,7 @@ fn copy_single(
     let mut buf = vec![0_u8; BUF_SIZE];
 
     loop {
-        if shutdown.load(Ordering::Relaxed) {
+        if shutdown.load(Ordering::Acquire) {
             drop(writer);
             let _ = cleanup_partial(dest);
             return Err((io::Error::new(io::ErrorKind::Interrupted, "shutdown"), true));

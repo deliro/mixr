@@ -491,7 +491,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             }
 
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                model.shutdown.store(true, Ordering::Relaxed);
+                model.shutdown.store(true, Ordering::Release);
                 model.should_quit = true;
                 return Effect::Quit;
             }
@@ -1444,6 +1444,6 @@ mod tests {
             }),
         );
         assert!(model.should_quit);
-        assert!(model.shutdown.load(Ordering::Relaxed));
+        assert!(model.shutdown.load(Ordering::Acquire));
     }
 }
