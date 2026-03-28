@@ -544,7 +544,7 @@ pub fn scan(
     let mut entries: Vec<FileEntry> = Vec::new();
 
     for result in WalkDir::new(source).into_iter() {
-        if shutdown.load(Ordering::Relaxed) {
+        if shutdown.load(Ordering::Acquire) {
             return;
         }
         let entry = match result {
@@ -826,7 +826,7 @@ pub fn copy_files(
     }
 
     for (index, entry) in files.iter().enumerate() {
-        if shutdown.load(Ordering::Relaxed) {
+        if shutdown.load(Ordering::Acquire) {
             let _ = tx.send(CopyMsg::Aborted);
             return;
         }
@@ -892,7 +892,7 @@ fn copy_single(
     let mut buf = vec![0u8; BUF_SIZE];
 
     loop {
-        if shutdown.load(Ordering::Relaxed) {
+        if shutdown.load(Ordering::Acquire) {
             drop(writer);
             let _ = cleanup_partial(dest);
             return Err((io::Error::new(io::ErrorKind::Interrupted, "shutdown"), true));
@@ -1414,7 +1414,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             if key.code == KeyCode::Char('c')
                 && key.modifiers.contains(KeyModifiers::CONTROL)
             {
-                model.shutdown.store(true, Ordering::Relaxed);
+                model.shutdown.store(true, Ordering::Release);
                 model.should_quit = true;
                 return Effect::Quit;
             }
@@ -1943,7 +1943,7 @@ mod tests {
             }),
         );
         assert!(model.should_quit);
-        assert!(model.shutdown.load(Ordering::Relaxed));
+        assert!(model.shutdown.load(Ordering::Acquire));
     }
 }
 ```

@@ -27,7 +27,7 @@ pub fn scan(
     let mut entries: Vec<FileEntry> = Vec::new();
 
     for result in WalkDir::new(source) {
-        if shutdown.load(Ordering::Relaxed) {
+        if shutdown.load(Ordering::Acquire) {
             return;
         }
 
