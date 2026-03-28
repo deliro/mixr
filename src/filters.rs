@@ -32,7 +32,7 @@ impl FilterSet {
             && self.matches_live(path)
     }
 
-    fn matches_extension(&self, path: &Path) -> bool {
+    pub fn matches_extension(&self, path: &Path) -> bool {
         if self.allowed_extensions.is_empty() {
             return true;
         }

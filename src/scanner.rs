@@ -8,6 +8,7 @@ use rand::seq::SliceRandom;
 use walkdir::WalkDir;
 
 use crate::filters::FilterSet;
+use crate::probe;
 use crate::types::{ByteSize, FileEntry};
 
 #[allow(dead_code)]
@@ -57,7 +58,16 @@ pub fn scan(
         };
         let size = meta.len();
 
-        let matched = filters.matches(&path, size, None);
+        let audio_meta = if filters.matches_extension(&path) {
+            probe::probe(&path)
+        } else {
+            probe::AudioMeta {
+                duration: None,
+                bitrate_kbps: None,
+            }
+        };
+
+        let matched = filters.matches(&path, size, audio_meta.duration);
         let _ = tx.send(ScanMsg::FileFound {
             path: path.clone(),
             matched,
@@ -67,8 +77,8 @@ pub fn scan(
             entries.push(FileEntry {
                 path,
                 size: ByteSize(size),
-                duration: None,
-                bitrate_kbps: None,
+                duration: audio_meta.duration,
+                bitrate_kbps: audio_meta.bitrate_kbps,
             });
         }
     }
@@ -242,5 +252,29 @@ mod tests {
         }];
         let selected = pack_into_budget(files, 100);
         assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn scan_populates_duration() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav_path = dir.path().join("test.wav");
+        crate::probe::tests::create_wav(&wav_path, 44100, 2, 3);
+
+        let (tx, rx) = mpsc::channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let filters = FilterSet::new(vec!["wav".to_string()], None, None, false);
+
+        scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
+
+        let mut found_duration = false;
+        for msg in rx.iter() {
+            if let ScanMsg::Complete(files) = msg {
+                if let Some(f) = files.first() {
+                    found_duration = f.duration.is_some();
+                }
+                break;
+            }
+        }
+        assert!(found_duration);
     }
 }
