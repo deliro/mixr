@@ -6,7 +6,7 @@ use std::time::Instant;
 use crate::copier::CopyMsg;
 use crate::i18n::{self, Locale};
 use crate::scanner::ScanMsg;
-use crate::types::{ByteSize, Config, FileEntry};
+use crate::types::{ByteSize, Config, Encoding, FileEntry};
 
 pub const MAX_UPCOMING: usize = 3;
 pub const MAX_HISTORY: usize = 4;
@@ -1176,10 +1176,14 @@ fn validate_and_start(form: &mut SetupForm, locale: &Locale) -> Effect {
         destination: PathBuf::from(resolve_path_value(&form.destination)),
         max_size,
         min_file_size,
+        min_duration: None,
         no_live: form.no_live,
         keep_names: form.keep_names,
         overwrite: form.overwrite,
         allowed_extensions,
+        encoding: Encoding::Keep,
+        cbr_bitrate: None,
+        vbr_quality: None,
     };
 
     Effect::StartScan(config)
@@ -1296,10 +1300,14 @@ mod tests {
             destination: PathBuf::from("/dst"),
             max_size: None,
             min_file_size: None,
+            min_duration: None,
             no_live: false,
             keep_names: false,
             overwrite: false,
             allowed_extensions: vec![],
+            encoding: Encoding::Keep,
+            cbr_bitrate: None,
+            vbr_quality: None,
         };
         let mut model = Model::new_cli(config, &i18n::EN);
 
@@ -1326,16 +1334,22 @@ mod tests {
             destination: PathBuf::from("/dst"),
             max_size: None,
             min_file_size: None,
+            min_duration: None,
             no_live: false,
             keep_names: false,
             overwrite: false,
             allowed_extensions: vec![],
+            encoding: Encoding::Keep,
+            cbr_bitrate: None,
+            vbr_quality: None,
         };
         let mut model = Model::new_cli(config, &i18n::EN);
 
         let files = vec![FileEntry {
             path: PathBuf::from("/src/a.mp3"),
             size: ByteSize(1000),
+            duration: None,
+            bitrate_kbps: None,
         }];
 
         let effect = update(&mut model, Msg::Scan(ScanMsg::Complete(files)));
@@ -1350,15 +1364,21 @@ mod tests {
             destination: PathBuf::from("/dst"),
             max_size: None,
             min_file_size: None,
+            min_duration: None,
             no_live: false,
             keep_names: false,
             overwrite: false,
             allowed_extensions: vec![],
+            encoding: Encoding::Keep,
+            cbr_bitrate: None,
+            vbr_quality: None,
         };
         let mut model = Model::new_cli(config, &i18n::EN);
         let files = vec![FileEntry {
             path: PathBuf::from("/src/a.mp3"),
             size: ByteSize(1000),
+            duration: None,
+            bitrate_kbps: None,
         }];
         update(&mut model, Msg::Scan(ScanMsg::Complete(files)));
         update(
@@ -1390,15 +1410,21 @@ mod tests {
             destination: PathBuf::from("/dst"),
             max_size: None,
             min_file_size: None,
+            min_duration: None,
             no_live: false,
             keep_names: false,
             overwrite: false,
             allowed_extensions: vec![],
+            encoding: Encoding::Keep,
+            cbr_bitrate: None,
+            vbr_quality: None,
         };
         let mut model = Model::new_cli(config, &i18n::EN);
         let files = vec![FileEntry {
             path: PathBuf::from("/src/a.mp3"),
             size: ByteSize(1000),
+            duration: None,
+            bitrate_kbps: None,
         }];
         update(&mut model, Msg::Scan(ScanMsg::Complete(files)));
         update(&mut model, Msg::Copy(CopyMsg::Complete));
@@ -1413,15 +1439,21 @@ mod tests {
             destination: PathBuf::from("/dst"),
             max_size: None,
             min_file_size: None,
+            min_duration: None,
             no_live: false,
             keep_names: false,
             overwrite: false,
             allowed_extensions: vec![],
+            encoding: Encoding::Keep,
+            cbr_bitrate: None,
+            vbr_quality: None,
         };
         let mut model = Model::new_cli(config, &i18n::EN);
         let files = vec![FileEntry {
             path: PathBuf::from("/src/a.mp3"),
             size: ByteSize(1000),
+            duration: None,
+            bitrate_kbps: None,
         }];
         update(&mut model, Msg::Scan(ScanMsg::Complete(files)));
         update(
