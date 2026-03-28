@@ -52,6 +52,33 @@ pub struct Locale {
     #[allow(dead_code)]
     pub about: &'static str,
 
+    #[allow(dead_code)]
+    pub min_duration: &'static str,
+    #[allow(dead_code)]
+    pub encoding_label: &'static str,
+    #[allow(dead_code)]
+    pub bitrate_label: &'static str,
+    #[allow(dead_code)]
+    pub quality_label: &'static str,
+    #[allow(dead_code)]
+    pub ph_min_duration: &'static str,
+    #[allow(dead_code)]
+    pub keep_original: &'static str,
+    #[allow(dead_code)]
+    pub quality_high: &'static str,
+    #[allow(dead_code)]
+    pub quality_medium: &'static str,
+    #[allow(dead_code)]
+    pub quality_low: &'static str,
+    #[allow(dead_code)]
+    pub err_invalid_duration: &'static str,
+    #[allow(dead_code)]
+    pub err_bitrate_required: &'static str,
+    #[allow(dead_code)]
+    pub preparing: &'static str,
+    #[allow(dead_code)]
+    pub converting: &'static str,
+
     pub err_source_not_found: &'static str,
     pub err_both_required: &'static str,
     pub err_usage: &'static str,
@@ -111,6 +138,20 @@ pub static EN: Locale = Locale {
 
     about: "Fill your flash drive with random music",
 
+    min_duration: "Min duration:",
+    encoding_label: "Encoding:",
+    bitrate_label: "Bitrate:",
+    quality_label: "Quality:",
+    ph_min_duration: "30s, 2m, 2:30",
+    keep_original: "Keep original",
+    quality_high: "High (~245kbps)",
+    quality_medium: "Medium (~190kbps)",
+    quality_low: "Low (~130kbps)",
+    err_invalid_duration: "Invalid duration format",
+    err_bitrate_required: "Bitrate is required for CBR",
+    preparing: "preparing\u{2026}",
+    converting: "converting\u{2026}",
+
     err_source_not_found: "Error: source not found",
     err_both_required: "Error: both SOURCE and DESTINATION are required in CLI mode",
     err_usage: "Usage: mixr [OPTIONS] <SOURCE> <DESTINATION>",
@@ -169,6 +210,20 @@ pub static RU: Locale = Locale {
     cli_errors: "ошибок",
 
     about: "Заполни флешку случайной музыкой",
+
+    min_duration: "Мин. длит.:",
+    encoding_label: "Кодирование:",
+    bitrate_label: "Битрейт:",
+    quality_label: "Качество:",
+    ph_min_duration: "30s, 2m, 2:30",
+    keep_original: "Без изменений",
+    quality_high: "Высокое (~245kbps)",
+    quality_medium: "Среднее (~190kbps)",
+    quality_low: "Низкое (~130kbps)",
+    err_invalid_duration: "Некорректная длительность",
+    err_bitrate_required: "Битрейт обязателен для CBR",
+    preparing: "подготовка\u{2026}",
+    converting: "конвертация\u{2026}",
 
     err_source_not_found: "Ошибка: источник не найден",
     err_both_required: "Ошибка: в режиме CLI необходимы SOURCE и DESTINATION",
