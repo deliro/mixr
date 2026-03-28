@@ -141,13 +141,9 @@ fn copy_single(
             break;
         }
 
-        let buf_slice = buf.get(..bytes_read).ok_or_else(|| {
-            (
-                io::Error::new(io::ErrorKind::InvalidData, "slice out of bounds"),
-                false,
-            )
-        })?;
-        writer.write_all(buf_slice).map_err(|e| (e, true))?;
+        writer
+            .write_all(buf.get(..bytes_read).unwrap_or(&buf))
+            .map_err(|e| (e, true))?;
         #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
         let written = bytes_read as u64;
         let _ = tx.send(CopyMsg::Progress {
@@ -166,20 +162,14 @@ fn dest_path_numbered(
     overwrite: bool,
 ) -> (PathBuf, usize) {
     let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("bin");
-    let mut num = start;
-    loop {
-        let path = destination.join(format!("{num:05}.{ext}"));
-        if overwrite || !path.exists() {
-            return (path, num.saturating_add(1));
-        }
-        num = num.saturating_add(1);
-        if num > 99999_usize {
-            return (
-                destination.join(format!("{num:05}.{ext}")),
-                num.saturating_add(1),
-            );
-        }
-    }
+    let num = (start..)
+        .take(100_000_usize)
+        .find(|&n| overwrite || !destination.join(format!("{n:05}.{ext}")).exists())
+        .unwrap_or(start);
+    (
+        destination.join(format!("{num:05}.{ext}")),
+        num.saturating_add(1),
+    )
 }
 
 fn dest_path_keep_name(destination: &Path, source: &Path) -> PathBuf {
@@ -199,13 +189,10 @@ fn dest_path_keep_name(destination: &Path, source: &Path) -> PathBuf {
         .unwrap_or("unknown");
     let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("bin");
 
-    for counter in 1_u32..=u32::MAX {
-        let candidate = destination.join(format!("({counter}) {stem}.{ext}"));
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-    destination.join(format!("{stem}.{ext}"))
+    (1_u32..=u32::MAX)
+        .map(|counter| destination.join(format!("({counter}) {stem}.{ext}")))
+        .find(|candidate| !candidate.exists())
+        .unwrap_or_else(|| destination.join(format!("{stem}.{ext}")))
 }
 
 fn cleanup_partial(path: &Path) -> io::Result<()> {

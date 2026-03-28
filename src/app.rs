@@ -213,49 +213,39 @@ impl SetupForm {
         let Some(val) = self.focused_value() else {
             return 0_usize;
         };
-        let chars: Vec<char> = val.chars().collect();
-        if self.cursor == 0_usize {
-            return 0_usize;
-        }
-        let mut pos = self.cursor;
-        while pos > 0_usize {
-            match chars.get(pos.saturating_sub(1)) {
-                Some(&c) if is_word_separator(c) => pos = pos.saturating_sub(1),
-                _ => break,
-            }
-        }
-        while pos > 0_usize {
-            match chars.get(pos.saturating_sub(1)) {
-                Some(&c) if !is_word_separator(c) => pos = pos.saturating_sub(1),
-                _ => break,
-            }
-        }
-        pos
+        let before: Vec<char> = val.chars().take(self.cursor).collect();
+        let skipped_separators = before
+            .iter()
+            .rev()
+            .take_while(|c| is_word_separator(**c))
+            .count();
+        let skipped_word = before
+            .iter()
+            .rev()
+            .skip(skipped_separators)
+            .take_while(|c| !is_word_separator(**c))
+            .count();
+        self.cursor
+            .saturating_sub(skipped_separators)
+            .saturating_sub(skipped_word)
     }
 
     fn word_boundary_right(&self) -> usize {
         let Some(val) = self.focused_value() else {
             return 0_usize;
         };
-        let chars: Vec<char> = val.chars().collect();
-        let len = chars.len();
-        if self.cursor >= len {
-            return len;
-        }
-        let mut pos = self.cursor;
-        while pos < len {
-            match chars.get(pos) {
-                Some(&c) if !is_word_separator(c) => pos = pos.saturating_add(1),
-                _ => break,
-            }
-        }
-        while pos < len {
-            match chars.get(pos) {
-                Some(&c) if is_word_separator(c) => pos = pos.saturating_add(1),
-                _ => break,
-            }
-        }
-        pos
+        let after_cursor = val.chars().skip(self.cursor);
+        let skipped_word = after_cursor
+            .clone()
+            .take_while(|c| !is_word_separator(*c))
+            .count();
+        let skipped_separators = after_cursor
+            .skip(skipped_word)
+            .take_while(|c| is_word_separator(*c))
+            .count();
+        self.cursor
+            .saturating_add(skipped_word)
+            .saturating_add(skipped_separators)
     }
 }
 
@@ -342,15 +332,20 @@ impl CopyState {
     }
 
     pub fn upcoming(&self) -> impl Iterator<Item = &FileItem> {
-        let start = self.current_index.saturating_add(1);
-        let end = (start.saturating_add(MAX_UPCOMING)).min(self.files.len());
-        self.files.get(start..end).unwrap_or(&[]).iter().rev()
+        self.files
+            .iter()
+            .skip(self.current_index.saturating_add(1))
+            .take(MAX_UPCOMING)
+            .rev()
     }
 
     pub fn history(&self) -> impl Iterator<Item = &FileItem> {
-        let end = self.current_index;
-        let start = end.saturating_sub(MAX_HISTORY);
-        self.files.get(start..end).unwrap_or(&[]).iter().rev()
+        let start = self.current_index.saturating_sub(MAX_HISTORY);
+        self.files
+            .iter()
+            .skip(start)
+            .take(self.current_index.saturating_sub(start))
+            .rev()
     }
 
     pub fn current(&self) -> Option<&FileItem> {
@@ -718,21 +713,10 @@ pub fn field_is_invalid(field: SetupField, value: &str) -> bool {
 }
 
 fn is_writable_or_creatable(path: &str) -> bool {
-    let p = std::path::Path::new(path);
-    if p.is_dir() {
-        return is_dir_writable(p);
-    }
-    let mut ancestor = p.to_path_buf();
-    while let Some(parent) = ancestor.parent().map(std::path::Path::to_path_buf) {
-        if parent.is_dir() {
-            return is_dir_writable(&parent);
-        }
-        if parent == ancestor {
-            break;
-        }
-        ancestor = parent;
-    }
-    false
+    std::path::Path::new(path)
+        .ancestors()
+        .find(|a| a.is_dir())
+        .is_some_and(is_dir_writable)
 }
 
 fn is_dir_writable(path: &std::path::Path) -> bool {
@@ -755,54 +739,39 @@ pub fn dest_existing_prefix_len(value: &str) -> usize {
     if path.is_dir() {
         return value.len();
     }
-    let mut ancestor = path.to_path_buf();
-    while let Some(parent) = ancestor.parent().map(std::path::Path::to_path_buf) {
-        if parent.is_dir() {
-            let resolved_str = resolved.as_str();
-            let parent_str = parent.to_str().unwrap_or("");
-            let existing_len = parent_str.len();
-            let offset = resolved_str.len().saturating_sub(value.len());
-            return existing_len.saturating_sub(offset);
-        }
-        ancestor = parent;
-    }
-    0_usize
+    path.ancestors()
+        .skip(1)
+        .find(|a| a.is_dir())
+        .and_then(|parent| parent.to_str())
+        .map_or(0_usize, |parent_str| {
+            let offset = resolved.len().saturating_sub(value.len());
+            parent_str.len().saturating_sub(offset)
+        })
 }
 
 fn navigate_to_volumes(form: &mut SetupForm) {
     #[cfg(target_os = "macos")]
     let base = Some("/Volumes/".to_string());
     #[cfg(target_os = "linux")]
-    let base = {
-        let mut result = None;
-        if let Ok(user) = std::env::var("USER") {
-            let media = format!("/media/{user}/");
-            if std::path::Path::new(&media).is_dir() {
-                result = Some(media);
-            } else {
-                let run_media = format!("/run/media/{user}/");
-                if std::path::Path::new(&run_media).is_dir() {
-                    result = Some(run_media);
-                }
-            }
-        }
-        if result.is_none() && std::path::Path::new("/mnt/").is_dir() {
-            result = Some("/mnt/".to_string());
-        }
-        result
-    };
+    let base = std::env::var("USER")
+        .ok()
+        .and_then(|user| {
+            [format!("/media/{user}/"), format!("/run/media/{user}/")]
+                .into_iter()
+                .find(|p| std::path::Path::new(p).is_dir())
+        })
+        .or_else(|| {
+            std::path::Path::new("/mnt/")
+                .is_dir()
+                .then(|| "/mnt/".to_string())
+        });
     #[cfg(windows)]
     let base: Option<String> = {
-        let mut drives: Vec<String> = Vec::new();
-        for letter in b'A'..=b'Z' {
-            #[allow(clippy::as_conversions)]
-            let drive = format!("{}:\\", letter as char);
-            if std::path::Path::new(&drive).exists() {
-                #[allow(clippy::as_conversions)]
-                let drive_path = format!("{}:/", letter as char);
-                drives.push(drive_path);
-            }
-        }
+        #[allow(clippy::as_conversions)]
+        let drives: Vec<String> = (b'A'..=b'Z')
+            .filter(|&letter| std::path::Path::new(&format!("{}:\\", letter as char)).exists())
+            .map(|letter| format!("{}:/", letter as char))
+            .collect();
         if !drives.is_empty() {
             match form.focused {
                 SetupField::Source => form.source.clear(),
