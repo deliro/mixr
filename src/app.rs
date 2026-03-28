@@ -832,6 +832,7 @@ fn navigate_to_volumes(form: &mut SetupForm) {
     }
 }
 
+#[cfg(not(windows))]
 fn resolve_path_value(raw: &str) -> String {
     if raw.is_empty() {
         let mut h = expand_path("~");
@@ -848,6 +849,32 @@ fn resolve_path_value(raw: &str) -> String {
         }
         format!("{h}{raw}")
     }
+}
+
+#[cfg(windows)]
+fn resolve_path_value(raw: &str) -> String {
+    if raw.is_empty() {
+        let mut h = expand_path("~");
+        if !h.ends_with('/') && !h.ends_with('\\') {
+            h.push('\\');
+        }
+        h
+    } else if raw.starts_with('~') {
+        expand_path(raw)
+    } else if is_windows_absolute(raw) {
+        raw.to_string()
+    } else {
+        let mut h = expand_path("~");
+        if !h.ends_with('/') && !h.ends_with('\\') {
+            h.push('\\');
+        }
+        format!("{h}{raw}")
+    }
+}
+
+#[cfg(windows)]
+fn is_windows_absolute(path: &str) -> bool {
+    matches!(path.as_bytes(), [letter, b':', ..] if letter.is_ascii_alphabetic())
 }
 
 fn refresh_dropdown(form: &mut SetupForm) {
@@ -925,26 +952,36 @@ fn apply_autocomplete(form: &mut SetupForm) {
         _ => return,
     };
 
-    let value = resolve_path_value(&raw_value);
-
-    let parent = if value.ends_with('/') || value.ends_with(std::path::MAIN_SEPARATOR) {
-        value.clone()
+    let new_value = if raw_value.is_empty() {
+        entry
     } else {
-        let path = std::path::Path::new(value.as_str());
-        match path.parent().and_then(|p| p.to_str()) {
-            Some("") => "/".to_string(),
-            Some(p) => {
-                let mut s = p.to_string();
-                if !s.ends_with('/') {
-                    s.push('/');
+        let value = resolve_path_value(&raw_value);
+        let parent = if value.ends_with('/') || value.ends_with(std::path::MAIN_SEPARATOR) {
+            value
+        } else {
+            let path = std::path::Path::new(value.as_str());
+            match path.parent().and_then(|p| p.to_str()) {
+                Some("") | None => {
+                    #[cfg(windows)]
+                    {
+                        String::new()
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        "/".to_string()
+                    }
                 }
-                s
+                Some(p) => {
+                    let mut s = p.to_string();
+                    if !s.ends_with('/') && !s.ends_with(std::path::MAIN_SEPARATOR) {
+                        s.push(std::path::MAIN_SEPARATOR);
+                    }
+                    s
+                }
             }
-            None => return,
-        }
+        };
+        format!("{parent}{entry}")
     };
-
-    let new_value = format!("{parent}{entry}");
     let new_cursor = new_value.chars().count();
 
     match form.focused {

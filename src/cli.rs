@@ -128,6 +128,7 @@ pub fn run(config: &Config, locale: &'static Locale) -> Result<bool, Error> {
                             cur.size,
                             width = cs.total_files.to_string().len(),
                         );
+                        let _ = stderr.flush();
                     }
                 }
             }
