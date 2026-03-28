@@ -67,6 +67,8 @@ pub fn scan(
             entries.push(FileEntry {
                 path,
                 size: ByteSize(size),
+                duration: None,
+                bitrate_kbps: None,
             });
         }
     }
@@ -198,14 +200,20 @@ mod tests {
             FileEntry {
                 path: PathBuf::from("a.mp3"),
                 size: ByteSize(5000),
+                duration: None,
+                bitrate_kbps: None,
             },
             FileEntry {
                 path: PathBuf::from("b.mp3"),
                 size: ByteSize(3000),
+                duration: None,
+                bitrate_kbps: None,
             },
             FileEntry {
                 path: PathBuf::from("c.mp3"),
                 size: ByteSize(4000),
+                duration: None,
+                bitrate_kbps: None,
             },
         ];
         let selected = pack_into_budget(files, 8000);
@@ -219,6 +227,8 @@ mod tests {
         let files = vec![FileEntry {
             path: PathBuf::from("huge.mp3"),
             size: ByteSize(1_000_000),
+            duration: None,
+            bitrate_kbps: None,
         }];
         let selected = pack_into_budget(files, 100);
         assert!(selected.is_empty());

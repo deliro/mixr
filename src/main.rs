@@ -13,7 +13,7 @@ use std::process::ExitCode;
 use clap::Parser;
 
 use filters::resolve_extensions;
-use types::{ByteSize, Config, DEFAULT_EXTENSIONS};
+use types::{ByteSize, Config, DEFAULT_EXTENSIONS, Encoding};
 
 #[derive(Parser)]
 #[command(
@@ -74,10 +74,14 @@ fn main() -> ExitCode {
                 destination,
                 max_size: args.size,
                 min_file_size: args.min_size,
+                min_duration: None,
                 no_live: args.no_live,
                 keep_names: args.keep_names,
                 overwrite: args.overwrite,
                 allowed_extensions,
+                encoding: Encoding::Keep,
+                cbr_bitrate: None,
+                vbr_quality: None,
             };
 
             match cli::run(&config, locale) {

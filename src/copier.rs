@@ -216,10 +216,14 @@ mod tests {
             FileEntry {
                 path: f1,
                 size: ByteSize(5000),
+                duration: None,
+                bitrate_kbps: None,
             },
             FileEntry {
                 path: f2,
                 size: ByteSize(3000),
+                duration: None,
+                bitrate_kbps: None,
             },
         ]
     }
@@ -272,6 +276,8 @@ mod tests {
         let files = vec![FileEntry {
             path: f1,
             size: ByteSize(100),
+            duration: None,
+            bitrate_kbps: None,
         }];
         let (tx, _rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -287,6 +293,8 @@ mod tests {
         let files = vec![FileEntry {
             path: PathBuf::from("/nonexistent/song.mp3"),
             size: ByteSize(100),
+            duration: None,
+            bitrate_kbps: None,
         }];
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));

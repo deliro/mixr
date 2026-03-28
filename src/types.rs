@@ -90,13 +90,53 @@ impl fmt::Display for ByteSize {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct FileEntry {
-    pub path: PathBuf,
-    pub size: ByteSize,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[allow(dead_code)]
+pub enum Encoding {
+    #[default]
+    Keep,
+    Cbr,
+    Vbr,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum VbrQuality {
+    High,
+    Medium,
+    Low,
+}
+
+#[allow(dead_code)]
+impl VbrQuality {
+    pub fn avg_bitrate_kbps(self) -> u16 {
+        match self {
+            Self::High => 245_u16,
+            Self::Medium => 190_u16,
+            Self::Low => 130_u16,
+        }
+    }
+
+    pub fn lame_quality(self) -> u8 {
+        match self {
+            Self::High => 0_u8,
+            Self::Medium => 2_u8,
+            Self::Low => 6_u8,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct FileEntry {
+    pub path: PathBuf,
+    pub size: ByteSize,
+    pub duration: Option<Duration>,
+    pub bitrate_kbps: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Config {
     pub source: PathBuf,
     pub destination: PathBuf,
@@ -106,6 +146,10 @@ pub struct Config {
     pub keep_names: bool,
     pub overwrite: bool,
     pub allowed_extensions: Vec<String>,
+    pub min_duration: Option<Duration>,
+    pub encoding: Encoding,
+    pub cbr_bitrate: Option<u16>,
+    pub vbr_quality: Option<VbrQuality>,
 }
 
 pub const DEFAULT_EXTENSIONS: &[&str] = &["mp3", "flac", "ogg", "wav", "m4a", "aac", "wma"];
@@ -135,6 +179,7 @@ pub enum Error {
         path: PathBuf,
         source: std::io::Error,
     },
+    InvalidDuration(ParseDurationError),
     Terminal(std::io::Error),
 }
 
@@ -162,6 +207,7 @@ impl fmt::Display for Error {
                     path.display()
                 )
             }
+            Self::InvalidDuration(e) => write!(f, "invalid duration: {e}"),
             Self::Terminal(e) => write!(f, "terminal error: {e}"),
         }
     }
@@ -172,6 +218,12 @@ impl std::error::Error for Error {}
 impl From<ParseSizeError> for Error {
     fn from(e: ParseSizeError) -> Self {
         Self::InvalidSize(e)
+    }
+}
+
+impl From<ParseDurationError> for Error {
+    fn from(e: ParseDurationError) -> Self {
+        Self::InvalidDuration(e)
     }
 }
 
