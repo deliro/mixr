@@ -11,6 +11,8 @@ walkdir = "2"
 fs4 = "0.13"
 rand = "0.9"
 sys-locale = "0.3.2"
+symphonia = { version = "0.5", features = ["mp3", "flac", "ogg", "wav", "aac", "alac", "isomp4", "pcm"] }
+mp3lame-encoder = "0.2"
 
 [profile.release]
 opt-level = "z"
