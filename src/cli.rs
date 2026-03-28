@@ -24,6 +24,7 @@ pub fn run(config: &Config, locale: &'static Locale) -> Result<bool, Error> {
     let filters = FilterSet::new(
         config.allowed_extensions.clone(),
         config.min_file_size,
+        config.min_duration,
         config.no_live,
     );
 
