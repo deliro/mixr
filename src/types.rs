@@ -379,4 +379,25 @@ mod tests {
         assert!(parse_duration("0").is_err());
         assert!(parse_duration("-5").is_err());
     }
+
+    #[test]
+    fn vbr_quality_avg_bitrate() {
+        assert_eq!(VbrQuality::High.avg_bitrate_kbps(), 245);
+        assert_eq!(VbrQuality::Medium.avg_bitrate_kbps(), 190);
+        assert_eq!(VbrQuality::Low.avg_bitrate_kbps(), 130);
+    }
+
+    #[test]
+    fn vbr_quality_lame_values() {
+        assert_eq!(VbrQuality::High.lame_quality(), 0);
+        assert_eq!(VbrQuality::Medium.lame_quality(), 2);
+        assert_eq!(VbrQuality::Low.lame_quality(), 6);
+    }
+
+    #[test]
+    fn format_duration_display() {
+        assert_eq!(format_duration(Duration::from_secs(65)), "01:05");
+        assert_eq!(format_duration(Duration::from_secs(3661)), "01:01:01");
+        assert_eq!(format_duration(Duration::from_secs(0)), "00:00");
+    }
 }

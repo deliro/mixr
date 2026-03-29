@@ -1597,4 +1597,99 @@ mod tests {
         assert!(model.should_quit);
         assert!(model.shutdown.load(Ordering::Acquire));
     }
+
+    #[test]
+    fn setup_field_next_skips_bitrate_when_keep() {
+        let field = SetupField::Encoding;
+        assert_eq!(field.next(Encoding::Keep), SetupField::NoLive);
+        assert_eq!(field.next(Encoding::Cbr), SetupField::Bitrate);
+        assert_eq!(field.next(Encoding::Vbr), SetupField::Bitrate);
+    }
+
+    #[test]
+    fn setup_field_prev_skips_bitrate_when_keep() {
+        let field = SetupField::NoLive;
+        assert_eq!(field.prev(Encoding::Keep), SetupField::Encoding);
+        assert_eq!(field.prev(Encoding::Cbr), SetupField::Bitrate);
+        assert_eq!(field.prev(Encoding::Vbr), SetupField::Bitrate);
+    }
+
+    #[test]
+    fn field_is_invalid_min_duration() {
+        assert!(!field_is_invalid(SetupField::MinDuration, ""));
+        assert!(!field_is_invalid(SetupField::MinDuration, "30s"));
+        assert!(!field_is_invalid(SetupField::MinDuration, "2m"));
+        assert!(!field_is_invalid(SetupField::MinDuration, "2:30"));
+        assert!(field_is_invalid(SetupField::MinDuration, "abc"));
+        assert!(field_is_invalid(SetupField::MinDuration, "0"));
+    }
+
+    #[test]
+    fn copy_preparing_sets_status() {
+        let config = Config {
+            source: PathBuf::from("/src"),
+            destination: PathBuf::from("/dst"),
+            max_size: None,
+            min_file_size: None,
+            min_duration: None,
+            no_live: false,
+            keep_names: false,
+            overwrite: false,
+            allowed_extensions: vec![],
+            encoding: Encoding::Keep,
+            cbr_bitrate: None,
+            vbr_quality: None,
+        };
+
+        let locale = &crate::i18n::EN;
+        let mut model = Model::new_cli(config.clone(), locale);
+
+        let files = vec![FileEntry {
+            path: PathBuf::from("/src/a.mp3"),
+            size: ByteSize(1000),
+            duration: None,
+            bitrate_kbps: None,
+        }];
+        let items: Vec<FileItem> = files
+            .iter()
+            .map(|f| FileItem {
+                name: "a.mp3".to_string(),
+                original_path: f.path.clone(),
+                size: f.size,
+                status: FileStatus::Queued,
+                converting: false,
+            })
+            .collect();
+        model.phase = Phase::Copying(CopyState {
+            config,
+            files: items,
+            current_index: 0_usize,
+            total_bytes: 1000_u64,
+            total_files: 1_usize,
+            copied_bytes: 0_u64,
+            current_file_copied: 0_u64,
+            current_file_size: 1000_u64,
+            started_at: std::time::Instant::now(),
+            speed_bytes: vec![],
+            errors: vec![],
+        });
+
+        let effect = update(
+            &mut model,
+            Msg::Copy(CopyMsg::Preparing {
+                index: 0_usize,
+                converting: true,
+            }),
+        );
+        assert!(matches!(effect, Effect::None));
+        if let Phase::Copying(cs) = &model.phase {
+            assert!(matches!(
+                cs.files.first().map(|f| f.status),
+                Some(FileStatus::Converting)
+            ));
+            assert!(cs.files.first().map_or(false, |f| f.converting));
+        } else {
+            panic!("Expected Copying phase");
+        }
+    }
 }

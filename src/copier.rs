@@ -673,4 +673,44 @@ mod tests {
             PathBuf::from("/usb/00100.flac")
         );
     }
+
+    #[test]
+    fn copy_keeps_mp3_below_threshold() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let mp3_path = src.path().join("song.mp3");
+        fs::write(&mp3_path, vec![1_u8; 1000]).unwrap();
+
+        let files = vec![FileEntry {
+            path: mp3_path,
+            size: ByteSize(1000),
+            duration: Some(std::time::Duration::from_secs(10)),
+            bitrate_kbps: Some(128),
+        }];
+
+        let config = Config {
+            source: src.path().to_path_buf(),
+            destination: dst.path().to_path_buf(),
+            max_size: None,
+            min_file_size: None,
+            min_duration: None,
+            no_live: false,
+            keep_names: true,
+            overwrite: false,
+            allowed_extensions: vec![],
+            encoding: Encoding::Cbr,
+            cbr_bitrate: Some(192),
+            vbr_quality: None,
+        };
+
+        let (tx, rx) = mpsc::channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        copy_files(&files, &config, &tx, &shutdown);
+
+        let messages: Vec<CopyMsg> = rx.try_iter().collect();
+        assert!(messages.iter().any(|m| matches!(m, CopyMsg::Complete)));
+        assert!(dst.path().join("song.mp3").exists());
+        let content = fs::read(dst.path().join("song.mp3")).unwrap();
+        assert_eq!(content, vec![1_u8; 1000]);
+    }
 }
