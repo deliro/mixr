@@ -72,9 +72,6 @@ pub fn run(config: &Config, locale: &'static Locale) -> Result<bool, Error> {
                 let _ = writeln!(stderr);
 
                 let shutdown = Arc::clone(&model.shutdown);
-                let destination = config.destination.clone();
-                let keep_names = config.keep_names;
-                let overwrite = config.overwrite;
                 let copy_tx = tx.clone();
                 thread::spawn(move || {
                     let (stx, srx) = mpsc::channel();
@@ -85,14 +82,7 @@ pub fn run(config: &Config, locale: &'static Locale) -> Result<bool, Error> {
                             }
                         }
                     });
-                    copier::copy_files(
-                        &files,
-                        &destination,
-                        keep_names,
-                        overwrite,
-                        &stx,
-                        &shutdown,
-                    );
+                    copier::copy_files(&files, &config, &stx, &shutdown);
                 });
             }
             Effect::Quit => break,
