@@ -1,22 +1,14 @@
-mod app;
-mod cli;
-mod copier;
-mod filters;
-mod i18n;
-mod probe;
-mod scanner;
-mod transcoder;
-mod tui;
-mod types;
-
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::Parser;
 
-use filters::resolve_extensions;
-use types::{ByteSize, Config, DEFAULT_EXTENSIONS, Encoding, VbrQuality, parse_duration};
+use mixr::cli;
+use mixr::filters::resolve_extensions;
+use mixr::i18n;
+use mixr::tui;
+use mixr::types::{ByteSize, Config, DEFAULT_EXTENSIONS, Encoding, VbrQuality, parse_duration};
 
 #[derive(Parser)]
 #[command(
