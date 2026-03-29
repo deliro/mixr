@@ -321,6 +321,7 @@ pub struct FileItem {
     pub original_path: PathBuf,
     pub size: ByteSize,
     pub status: FileStatus,
+    pub converting: bool,
 }
 
 #[derive(Debug)]
@@ -606,6 +607,7 @@ fn handle_scan(model: &mut Model, scan_msg: ScanMsg) -> Effect {
                     original_path: f.path.clone(),
                     size: f.size,
                     status: FileStatus::Queued,
+                    converting: false,
                 })
                 .collect();
 
@@ -720,6 +722,7 @@ fn handle_copy(model: &mut Model, copy_msg: CopyMsg) -> Effect {
             if let Phase::Copying(cs) = &mut model.phase
                 && let Some(file) = cs.files.get_mut(index)
             {
+                file.converting = converting;
                 file.status = if converting {
                     FileStatus::Converting
                 } else {

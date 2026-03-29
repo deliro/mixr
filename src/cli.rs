@@ -109,9 +109,24 @@ pub fn run(config: &Config, locale: &'static Locale) -> Result<bool, Error> {
                     if last_printed_index != Some(idx) && matches!(cur.status, FileStatus::Copying)
                     {
                         last_printed_index = Some(idx);
+                        let marker = if cur.converting {
+                            let orig_ext = cur
+                                .original_path
+                                .extension()
+                                .and_then(|e| e.to_str())
+                                .unwrap_or("")
+                                .to_lowercase();
+                            if orig_ext == "mp3" {
+                                " [reencoding]"
+                            } else {
+                                " [converting]"
+                            }
+                        } else {
+                            ""
+                        };
                         let _ = writeln!(
                             stderr,
-                            "[{:>width$}/{}]  {} <- {} ({})",
+                            "[{:>width$}/{}]  {} <- {} ({}){marker}",
                             idx.saturating_add(1),
                             cs.total_files,
                             cur.name,
