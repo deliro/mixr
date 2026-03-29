@@ -13,11 +13,12 @@ mod types;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use clap::Parser;
 
 use filters::resolve_extensions;
-use types::{ByteSize, Config, DEFAULT_EXTENSIONS, Encoding};
+use types::{ByteSize, Config, DEFAULT_EXTENSIONS, Encoding, VbrQuality, parse_duration};
 
 #[derive(Parser)]
 #[command(
@@ -50,10 +51,26 @@ struct Args {
 
     #[arg(long)]
     overwrite: bool,
+
+    #[arg(long, value_parser = parse_duration_arg)]
+    min_duration: Option<Duration>,
+
+    #[arg(long, default_value = "keep")]
+    encoding: String,
+
+    #[arg(long)]
+    bitrate: Option<u16>,
+
+    #[arg(long)]
+    quality: Option<String>,
 }
 
 fn parse_byte_size(s: &str) -> Result<ByteSize, String> {
     ByteSize::parse(s).map_err(|e| e.to_string())
+}
+
+fn parse_duration_arg(s: &str) -> Result<Duration, String> {
+    parse_duration(s).map_err(|e| e.to_string())
 }
 
 fn main() -> ExitCode {
@@ -73,19 +90,54 @@ fn main() -> ExitCode {
                 DEFAULT_EXTENSIONS,
             );
 
+            let encoding = match args.encoding.as_str() {
+                "keep" => Encoding::Keep,
+                "cbr" => Encoding::Cbr,
+                "vbr" => Encoding::Vbr,
+                other => {
+                    eprintln!("Unknown encoding: {other}. Use: keep, cbr, vbr");
+                    return ExitCode::FAILURE;
+                }
+            };
+
+            let cbr_bitrate = if encoding == Encoding::Cbr {
+                if let Some(br) = args.bitrate {
+                    Some(br)
+                } else {
+                    eprintln!("{}", locale.err_bitrate_required);
+                    return ExitCode::FAILURE;
+                }
+            } else {
+                None
+            };
+
+            let vbr_quality = if encoding == Encoding::Vbr {
+                Some(match args.quality.as_deref() {
+                    Some("high") => VbrQuality::High,
+                    Some("medium") | None => VbrQuality::Medium,
+                    Some("low") => VbrQuality::Low,
+                    Some(other) => {
+                        eprintln!("Unknown quality: {other}. Use: high, medium, low");
+                        return ExitCode::FAILURE;
+                    }
+                })
+            } else {
+                None
+            };
+
             let config = Config {
                 source,
                 destination,
                 max_size: args.size,
                 min_file_size: args.min_size,
-                min_duration: None,
+                min_duration: args.min_duration,
                 no_live: args.no_live,
                 keep_names: args.keep_names,
                 overwrite: args.overwrite,
                 allowed_extensions,
-                encoding: Encoding::Keep,
-                cbr_bitrate: None,
-                vbr_quality: None,
+                encoding,
+                cbr_bitrate,
+                vbr_quality,
             };
 
             match cli::run(&config, locale) {
