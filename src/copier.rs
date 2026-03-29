@@ -119,7 +119,10 @@ fn needs_transcode(entry: &FileEntry, config: &Config) -> bool {
                 ),
                 Encoding::Keep => return false,
             };
-            entry.bitrate_kbps.is_some_and(|br| br > threshold)
+            let bitrate = entry
+                .bitrate_kbps
+                .or_else(|| crate::probe::probe(&entry.path).bitrate_kbps);
+            bitrate.is_none_or(|br| br > threshold)
         }
     }
 }

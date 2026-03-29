@@ -322,6 +322,7 @@ pub struct FileItem {
     pub size: ByteSize,
     pub status: FileStatus,
     pub converting: bool,
+    pub written_bytes: u64,
 }
 
 #[derive(Debug)]
@@ -620,6 +621,7 @@ fn handle_scan(model: &mut Model, scan_msg: ScanMsg) -> Effect {
                     size: f.size,
                     status: FileStatus::Queued,
                     converting: false,
+                    written_bytes: 0_u64,
                 })
                 .collect();
 
@@ -691,6 +693,7 @@ fn handle_copy(model: &mut Model, copy_msg: CopyMsg) -> Effect {
                 && let Some(item) = cs.files.get_mut(index)
             {
                 item.status = FileStatus::Done;
+                item.written_bytes = cs.current_file_copied;
             }
             Effect::None
         }
@@ -1676,6 +1679,7 @@ mod tests {
                 size: f.size,
                 status: FileStatus::Queued,
                 converting: false,
+                written_bytes: 0_u64,
             })
             .collect();
         model.phase = Phase::Copying(CopyState {

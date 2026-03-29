@@ -756,8 +756,19 @@ fn render_file_list(cs: &CopyState, locale: &Locale, frame: &mut Frame, area: Re
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or(&cur.name);
+        let size_info = if cur.converting {
+            let written = ByteSize(cs.current_file_copied);
+            format!(
+                " ({} \u{2192} {}) [{}]",
+                cur.size,
+                written,
+                locale.converting.trim_end_matches('\u{2026}')
+            )
+        } else {
+            format!(" ({})", cur.size)
+        };
         lines.push(Line::from(Span::styled(
-            format!("> {cur_display} ({})", cur.size),
+            format!("> {cur_display}{size_info}"),
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
@@ -782,7 +793,15 @@ fn render_file_list(cs: &CopyState, locale: &Locale, frame: &mut Frame, area: Re
                     FileStatus::Failed => Style::default().fg(Color::Red),
                     _ => Style::default(),
                 };
-                Line::from(Span::styled(format!("  {hist_display}"), style))
+                let size_suffix = if item.converting && item.written_bytes > 0_u64 {
+                    format!(" ({} \u{2192} {})", item.size, ByteSize(item.written_bytes))
+                } else {
+                    String::new()
+                };
+                Line::from(Span::styled(
+                    format!("  {hist_display}{size_suffix}"),
+                    style,
+                ))
             }),
     );
     lines.extend(
