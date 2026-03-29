@@ -176,33 +176,48 @@ fn view(model: &Model, frame: &mut Frame) {
     }
 }
 
-#[allow(clippy::too_many_lines)]
 fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) {
     let block = Block::bordered().title(" mixr ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     let chunks = Layout::vertical([
-        Constraint::Length(1), // 0: Source
-        Constraint::Length(1), // 1: Destination
-        Constraint::Length(1), // 2: Size
-        Constraint::Length(1), // 3: MinSize
-        Constraint::Length(1), // 4: MinDuration
-        Constraint::Length(1), // 5: Extensions
-        Constraint::Length(1), // 6: Exclude
-        Constraint::Length(1), // 7: Encoding
-        Constraint::Length(1), // 8: Bitrate/Quality
-        Constraint::Length(1), // 9: NoLive
-        Constraint::Length(1), // 10: KeepNames
-        Constraint::Length(1), // 11: Overwrite
-        Constraint::Length(1), // 12: blank
-        Constraint::Length(1), // 13: Start
-        Constraint::Min(0),    // 14: spacer
-        Constraint::Length(1), // 15: help
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+        Constraint::Length(1),
     ])
     .areas::<16>(inner);
 
     let label_width = 14_usize;
+    render_text_fields(form, locale, label_width, &chunks, frame);
+    render_encoding_field(form, locale, label_width, &chunks, frame);
+    render_bitrate_field(form, locale, label_width, &chunks, frame);
+    render_checkboxes(form, locale, label_width, &chunks, frame);
+    render_start_button(form, locale, &chunks, frame);
+    render_help_line(form, locale, &chunks, frame);
+    render_dropdown(form, label_width, inner, &chunks, frame);
+}
+
+fn render_text_fields(
+    form: &SetupForm,
+    locale: &Locale,
+    label_width: usize,
+    chunks: &[Rect; 16],
+    frame: &mut Frame,
+) {
     let fields: &[(SetupField, &str, &str)] = &[
         (SetupField::Source, locale.source, &form.source),
         (
@@ -222,117 +237,153 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
     ];
 
     for (i, (field, label, value)) in fields.iter().enumerate() {
-        let focused = form.focused == *field;
-        let label_style = if focused {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default()
-        };
-        let invalid = field_is_invalid(*field, value);
-
-        let dest_split = if *field == SetupField::Destination && !value.is_empty() {
-            Some(dest_existing_prefix_len(value))
-        } else {
-            None
-        };
-
-        let mut spans = vec![Span::styled(format!("{label:<label_width$}"), label_style)];
-
-        let dim = Style::default().fg(Color::DarkGray);
-
-        if value.is_empty() && !focused {
-            spans.push(Span::styled(field.placeholder(locale), dim));
-        } else if focused {
-            let chars: Vec<char> = value.chars().collect();
-            let cursor_pos = form.cursor.min(chars.len());
-
-            let style_for_char = |ci: usize| -> Style {
-                if invalid {
-                    Style::default().fg(Color::Red)
-                } else if let Some(split) = dest_split {
-                    let byte_pos = chars
-                        .get(..ci)
-                        .map_or(0_usize, |slice| slice.iter().collect::<String>().len());
-                    if byte_pos >= split {
-                        Style::default().fg(Color::Yellow)
-                    } else {
-                        Style::default()
-                    }
-                } else {
-                    Style::default()
-                }
-            };
-
-            if chars.is_empty() {
-                spans.push(Span::styled(
-                    " ".to_string(),
-                    Style::default().bg(Color::White).fg(Color::Black),
-                ));
-                spans.push(Span::styled(format!(" {}", field.placeholder(locale)), dim));
-            } else {
-                let cursor_style = Style::default().bg(Color::White).fg(Color::Black);
-                let mut run = String::new();
-                let mut run_style = style_for_char(0_usize);
-
-                for (i, &ch) in chars.iter().enumerate() {
-                    if i == cursor_pos {
-                        if !run.is_empty() {
-                            spans.push(Span::styled(std::mem::take(&mut run), run_style));
-                        }
-                        spans.push(Span::styled(ch.to_string(), cursor_style));
-                        run_style = style_for_char(i.saturating_add(1));
-                        continue;
-                    }
-                    let style = style_for_char(i);
-                    if style != run_style && !run.is_empty() {
-                        spans.push(Span::styled(std::mem::take(&mut run), run_style));
-                        run_style = style;
-                    }
-                    run.push(ch);
-                }
-                if !run.is_empty() {
-                    spans.push(Span::styled(run, run_style));
-                }
-                if cursor_pos >= chars.len() {
-                    spans.push(Span::styled(" ".to_string(), cursor_style));
-                }
-            }
-
-            if field.is_ext() && !value.is_empty() {
-                let formatted = format_ext_list(value);
-                if !formatted.is_empty() {
-                    spans.push(Span::styled(format!("  \u{2192} {formatted}"), dim));
-                }
-            }
-        } else if let Some(split) = dest_split {
-            if split >= value.len() {
-                spans.push(Span::raw((*value).to_string()));
-            } else {
-                let existing: String = value.chars().take(split).collect();
-                let new_part: String = value.chars().skip(split).collect();
-                spans.push(Span::raw(existing));
-                spans.push(Span::styled(new_part, Style::default().fg(Color::Yellow)));
-            }
-        } else if invalid {
-            spans.push(Span::styled(
-                (*value).to_string(),
-                Style::default().fg(Color::Red),
-            ));
-        } else {
-            spans.push(Span::raw((*value).to_string()));
-            if field.is_ext() && !value.is_empty() {
-                let formatted = format_ext_list(value);
-                if !formatted.is_empty() {
-                    spans.push(Span::styled(format!("  \u{2192} {formatted}"), dim));
-                }
-            }
-        }
-
+        let spans = build_field_spans(form, locale, *field, label, value, label_width);
         if let Some(chunk) = chunks.get(i) {
             frame.render_widget(Paragraph::new(Line::from(spans)), *chunk);
         }
     }
+}
 
+fn build_field_spans<'a>(
+    form: &SetupForm,
+    locale: &Locale,
+    field: SetupField,
+    label: &str,
+    value: &'a str,
+    label_width: usize,
+) -> Vec<Span<'a>> {
+    let focused = form.focused == field;
+    let label_style = if focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+    let invalid = field_is_invalid(field, value);
+    let dest_split = if field == SetupField::Destination && !value.is_empty() {
+        Some(dest_existing_prefix_len(value))
+    } else {
+        None
+    };
+
+    let mut spans = vec![Span::styled(format!("{label:<label_width$}"), label_style)];
+    let dim = Style::default().fg(Color::DarkGray);
+
+    if value.is_empty() && !focused {
+        spans.push(Span::styled(field.placeholder(locale), dim));
+    } else if focused {
+        build_focused_spans(
+            &mut spans,
+            form,
+            value,
+            invalid,
+            dest_split,
+            field.placeholder(locale),
+        );
+        if field.is_ext() && !value.is_empty() {
+            let formatted = format_ext_list(value);
+            if !formatted.is_empty() {
+                spans.push(Span::styled(format!("  \u{2192} {formatted}"), dim));
+            }
+        }
+    } else if let Some(split) = dest_split {
+        if split >= value.len() {
+            spans.push(Span::raw((*value).to_string()));
+        } else {
+            let existing: String = value.chars().take(split).collect();
+            let new_part: String = value.chars().skip(split).collect();
+            spans.push(Span::raw(existing));
+            spans.push(Span::styled(new_part, Style::default().fg(Color::Yellow)));
+        }
+    } else if invalid {
+        spans.push(Span::styled(
+            (*value).to_string(),
+            Style::default().fg(Color::Red),
+        ));
+    } else {
+        spans.push(Span::raw((*value).to_string()));
+        if field.is_ext() && !value.is_empty() {
+            let formatted = format_ext_list(value);
+            if !formatted.is_empty() {
+                spans.push(Span::styled(format!("  \u{2192} {formatted}"), dim));
+            }
+        }
+    }
+
+    spans
+}
+
+fn build_focused_spans<'a>(
+    spans: &mut Vec<Span<'a>>,
+    form: &SetupForm,
+    value: &'a str,
+    invalid: bool,
+    dest_split: Option<usize>,
+    placeholder: &str,
+) {
+    let chars: Vec<char> = value.chars().collect();
+    let cursor_pos = form.cursor.min(chars.len());
+    let dim = Style::default().fg(Color::DarkGray);
+
+    let style_for_char = |ci: usize| -> Style {
+        if invalid {
+            Style::default().fg(Color::Red)
+        } else if let Some(split) = dest_split {
+            let byte_pos = chars
+                .get(..ci)
+                .map_or(0_usize, |slice| slice.iter().collect::<String>().len());
+            if byte_pos >= split {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default()
+            }
+        } else {
+            Style::default()
+        }
+    };
+
+    if chars.is_empty() {
+        spans.push(Span::styled(
+            " ".to_string(),
+            Style::default().bg(Color::White).fg(Color::Black),
+        ));
+        spans.push(Span::styled(format!(" {placeholder}"), dim));
+    } else {
+        let cursor_style = Style::default().bg(Color::White).fg(Color::Black);
+        let mut run = String::new();
+        let mut run_style = style_for_char(0_usize);
+
+        for (i, &ch) in chars.iter().enumerate() {
+            if i == cursor_pos {
+                if !run.is_empty() {
+                    spans.push(Span::styled(std::mem::take(&mut run), run_style));
+                }
+                spans.push(Span::styled(ch.to_string(), cursor_style));
+                run_style = style_for_char(i.saturating_add(1));
+                continue;
+            }
+            let style = style_for_char(i);
+            if style != run_style && !run.is_empty() {
+                spans.push(Span::styled(std::mem::take(&mut run), run_style));
+                run_style = style;
+            }
+            run.push(ch);
+        }
+        if !run.is_empty() {
+            spans.push(Span::styled(run, run_style));
+        }
+        if cursor_pos >= chars.len() {
+            spans.push(Span::styled(" ".to_string(), cursor_style));
+        }
+    }
+}
+
+fn render_encoding_field(
+    form: &SetupForm,
+    locale: &Locale,
+    label_width: usize,
+    chunks: &[Rect; 16],
+    frame: &mut Frame,
+) {
     let encoding_value = match form.encoding {
         Encoding::Keep => locale.keep_original,
         Encoding::Cbr => "CBR",
@@ -353,7 +404,15 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
     if let Some(chunk) = chunks.get(7) {
         frame.render_widget(Paragraph::new(encoding_line), *chunk);
     }
+}
 
+fn render_bitrate_field(
+    form: &SetupForm,
+    locale: &Locale,
+    label_width: usize,
+    chunks: &[Rect; 16],
+    frame: &mut Frame,
+) {
     let bitrate_info = match form.encoding {
         Encoding::Cbr => Some((
             locale.bitrate_label,
@@ -383,7 +442,15 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
             frame.render_widget(Paragraph::new(bitrate_line), *chunk);
         }
     }
+}
 
+fn render_checkboxes(
+    form: &SetupForm,
+    locale: &Locale,
+    label_width: usize,
+    chunks: &[Rect; 16],
+    frame: &mut Frame,
+) {
     let checkboxes: &[(SetupField, &str, bool, usize)] = &[
         (SetupField::NoLive, locale.no_live, form.no_live, 9_usize),
         (
@@ -415,7 +482,9 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
             frame.render_widget(Paragraph::new(line), *chunk);
         }
     }
+}
 
+fn render_start_button(form: &SetupForm, locale: &Locale, chunks: &[Rect; 16], frame: &mut Frame) {
     let start_style = if form.focused == SetupField::Start {
         Style::default()
             .fg(Color::Black)
@@ -428,7 +497,9 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
     if let Some(chunk) = chunks.get(13) {
         frame.render_widget(Paragraph::new(start).alignment(Alignment::Center), *chunk);
     }
+}
 
+fn render_help_line(form: &SetupForm, locale: &Locale, chunks: &[Rect; 16], frame: &mut Frame) {
     let help = if let Some(err) = &form.error {
         Line::from(Span::styled(err.as_str(), Style::default().fg(Color::Red)))
     } else {
@@ -440,50 +511,59 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
     if let Some(chunk) = chunks.get(15) {
         frame.render_widget(Paragraph::new(help), *chunk);
     }
+}
 
-    if form.dropdown.visible && !form.dropdown.entries.is_empty() && form.focused.is_path() {
-        let field_row = match form.focused {
-            SetupField::Destination => 1_usize,
-            _ => 0_usize,
-        };
-        let field_chunk_y = chunks.get(field_row).map_or(inner.y, |c| c.y);
-        let dropdown_y = field_chunk_y.saturating_add(1);
-        #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-        let label_w_u16 = label_width as u16;
-        let dropdown_x = inner.x.saturating_add(label_w_u16);
-        let dropdown_w = inner.width.saturating_sub(label_w_u16);
-        let visible_count = (form
-            .dropdown
-            .entries
-            .len()
-            .saturating_sub(form.dropdown.scroll_offset))
-        .min(crate::app::MAX_DROPDOWN);
-        #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-        let dropdown_h = (visible_count as u16).saturating_add(2);
-        let dropdown_rect = Rect::new(dropdown_x, dropdown_y, dropdown_w, dropdown_h);
-
-        let items: Vec<ListItem> = form
-            .dropdown
-            .entries
-            .iter()
-            .skip(form.dropdown.scroll_offset)
-            .take(crate::app::MAX_DROPDOWN)
-            .enumerate()
-            .map(|(i, entry)| {
-                let idx = i.saturating_add(form.dropdown.scroll_offset);
-                let style = if idx == form.dropdown.selected {
-                    Style::default().bg(Color::Yellow).fg(Color::Black)
-                } else {
-                    Style::default()
-                };
-                ListItem::new(Span::styled(entry.as_str(), style))
-            })
-            .collect();
-
-        let list = List::new(items).block(Block::bordered());
-        frame.render_widget(Clear, dropdown_rect);
-        frame.render_widget(list, dropdown_rect);
+fn render_dropdown(
+    form: &SetupForm,
+    label_width: usize,
+    inner: Rect,
+    chunks: &[Rect; 16],
+    frame: &mut Frame,
+) {
+    if !form.dropdown.visible || form.dropdown.entries.is_empty() || !form.focused.is_path() {
+        return;
     }
+    let field_row = match form.focused {
+        SetupField::Destination => 1_usize,
+        _ => 0_usize,
+    };
+    let field_chunk_y = chunks.get(field_row).map_or(inner.y, |c| c.y);
+    let dropdown_y = field_chunk_y.saturating_add(1);
+    #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+    let label_w_u16 = label_width as u16;
+    let dropdown_x = inner.x.saturating_add(label_w_u16);
+    let dropdown_w = inner.width.saturating_sub(label_w_u16);
+    let visible_count = (form
+        .dropdown
+        .entries
+        .len()
+        .saturating_sub(form.dropdown.scroll_offset))
+    .min(crate::app::MAX_DROPDOWN);
+    #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+    let dropdown_h = (visible_count as u16).saturating_add(2);
+    let dropdown_rect = Rect::new(dropdown_x, dropdown_y, dropdown_w, dropdown_h);
+
+    let items: Vec<ListItem> = form
+        .dropdown
+        .entries
+        .iter()
+        .skip(form.dropdown.scroll_offset)
+        .take(crate::app::MAX_DROPDOWN)
+        .enumerate()
+        .map(|(i, entry)| {
+            let idx = i.saturating_add(form.dropdown.scroll_offset);
+            let style = if idx == form.dropdown.selected {
+                Style::default().bg(Color::Yellow).fg(Color::Black)
+            } else {
+                Style::default()
+            };
+            ListItem::new(Span::styled(entry.as_str(), style))
+        })
+        .collect();
+
+    let list = List::new(items).block(Block::bordered());
+    frame.render_widget(Clear, dropdown_rect);
+    frame.render_widget(list, dropdown_rect);
 }
 
 fn view_scanning(
@@ -567,7 +647,6 @@ fn encoding_label(cs: &CopyState, locale: &Locale) -> String {
     }
 }
 
-#[allow(clippy::too_many_lines)]
 fn view_copying(
     cs: &CopyState,
     locale: &Locale,
@@ -600,7 +679,14 @@ fn view_copying(
     .areas::<7>(inner);
 
     render_file_list(cs, locale, frame, chunks[0_usize]);
+    render_current_gauge(cs, locale, &chunks, frame);
+    render_total_gauge(cs, locale, &chunks, frame);
+    render_speed_line(cs, locale, &chunks, frame);
+    render_error_lines(cs, locale, &chunks, frame);
+    render_copying_help(locale, confirm_quit, &chunks, frame);
+}
 
+fn render_current_gauge(cs: &CopyState, locale: &Locale, chunks: &[Rect; 7], frame: &mut Frame) {
     let current_pct = format!(
         "{:.0}%",
         cs.current_progress().clamp(0.0_f64, 1.0_f64) * 100.0_f64
@@ -629,7 +715,9 @@ fn view_copying(
     if let Some(chunk) = chunks.get(2) {
         frame.render_widget(current_gauge, *chunk);
     }
+}
 
+fn render_total_gauge(cs: &CopyState, locale: &Locale, chunks: &[Rect; 7], frame: &mut Frame) {
     let done_count = cs
         .files
         .iter()
@@ -663,7 +751,9 @@ fn view_copying(
     if let Some(chunk) = chunks.get(3) {
         frame.render_widget(total_gauge, *chunk);
     }
+}
 
+fn render_speed_line(cs: &CopyState, locale: &Locale, chunks: &[Rect; 7], frame: &mut Frame) {
     let speed = cs.speed();
     #[allow(
         clippy::cast_possible_truncation,
@@ -689,25 +779,30 @@ fn view_copying(
     if let Some(chunk) = chunks.get(4) {
         frame.render_widget(Paragraph::new(status), *chunk);
     }
+}
 
-    if !cs.errors.is_empty() {
-        let max_shown = 3_usize;
-        let start = cs.errors.len().saturating_sub(max_shown);
-        let mut error_lines = vec![Line::from(Span::styled(
-            format!("{} ({}):", locale.errors, cs.errors.len()),
-            Style::default().fg(Color::Red).add_modifier(Modifier::DIM),
-        ))];
-        error_lines.extend(cs.errors.iter().skip(start).map(|err| {
-            Line::from(Span::styled(
-                format!("  {err}"),
-                Style::default().fg(Color::Red).add_modifier(Modifier::DIM),
-            ))
-        }));
-        if let Some(chunk) = chunks.get(5) {
-            frame.render_widget(Paragraph::new(error_lines), *chunk);
-        }
+fn render_error_lines(cs: &CopyState, locale: &Locale, chunks: &[Rect; 7], frame: &mut Frame) {
+    if cs.errors.is_empty() {
+        return;
     }
+    let max_shown = 3_usize;
+    let start = cs.errors.len().saturating_sub(max_shown);
+    let mut error_lines = vec![Line::from(Span::styled(
+        format!("{} ({}):", locale.errors, cs.errors.len()),
+        Style::default().fg(Color::Red).add_modifier(Modifier::DIM),
+    ))];
+    error_lines.extend(cs.errors.iter().skip(start).map(|err| {
+        Line::from(Span::styled(
+            format!("  {err}"),
+            Style::default().fg(Color::Red).add_modifier(Modifier::DIM),
+        ))
+    }));
+    if let Some(chunk) = chunks.get(5) {
+        frame.render_widget(Paragraph::new(error_lines), *chunk);
+    }
+}
 
+fn render_copying_help(locale: &Locale, confirm_quit: bool, chunks: &[Rect; 7], frame: &mut Frame) {
     let help = if confirm_quit {
         Line::from(Span::styled(
             "Press Ctrl+C again to stop",

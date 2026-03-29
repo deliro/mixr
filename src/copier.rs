@@ -86,7 +86,7 @@ pub fn copy_files(
     let writer_shutdown = Arc::clone(shutdown);
 
     let writer_handle = thread::spawn(move || {
-        writer_thread(pipe_rx, &progress_tx, &writer_shutdown);
+        writer_thread(&pipe_rx, &progress_tx, &writer_shutdown);
     });
 
     reader_thread(files, config, &pipe_tx, shutdown);
@@ -397,15 +397,14 @@ impl<'a> WriterState<'a> {
     }
 }
 
-#[allow(clippy::needless_pass_by_value)]
 fn writer_thread(
-    pipe_rx: mpsc::Receiver<PipeMsg>,
+    pipe_rx: &mpsc::Receiver<PipeMsg>,
     progress_tx: &Sender<CopyMsg>,
     shutdown: &Arc<AtomicBool>,
 ) {
     let mut state = WriterState::new(progress_tx, shutdown);
 
-    for msg in &pipe_rx {
+    for msg in pipe_rx {
         match msg {
             PipeMsg::Preparing { index, converting } => {
                 let _ = progress_tx.send(CopyMsg::Preparing { index, converting });

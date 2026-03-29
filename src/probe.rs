@@ -48,16 +48,18 @@ fn probe_inner(path: &Path) -> Option<AudioMeta> {
         Duration::from_secs_f64(secs)
     });
 
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        clippy::cast_precision_loss,
-        clippy::as_conversions
-    )]
     let bitrate_kbps = duration.and_then(|d| {
         let secs = d.as_secs_f64();
         if secs > 0.0_f64 {
-            Some((file_size.saturating_mul(8_u64) as f64 / secs / 1000.0_f64) as u32)
+            #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+            let bits_f64 = file_size.saturating_mul(8_u64) as f64;
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                clippy::as_conversions
+            )]
+            let kbps = (bits_f64 / secs / 1000.0_f64) as u32;
+            Some(kbps)
         } else {
             None
         }

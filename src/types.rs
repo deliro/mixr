@@ -59,13 +59,14 @@ impl ByteSize {
             other => return Err(ParseSizeError::UnknownUnit(other.to_string())),
         };
 
+        #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+        let multiplier_f64 = multiplier as f64;
         #[allow(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
-            clippy::cast_precision_loss,
             clippy::as_conversions
         )]
-        let result = (num * multiplier as f64) as u64;
+        let result = (num * multiplier_f64) as u64;
         Ok(Self(result))
     }
 
@@ -75,15 +76,20 @@ impl ByteSize {
 }
 
 impl fmt::Display for ByteSize {
-    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let bytes = self.0;
         if bytes >= GB {
-            write!(f, "{:.1}G", bytes as f64 / GB as f64)
+            #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+            let val = bytes as f64 / GB as f64;
+            write!(f, "{val:.1}G")
         } else if bytes >= MB {
-            write!(f, "{:.1}M", bytes as f64 / MB as f64)
+            #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+            let val = bytes as f64 / MB as f64;
+            write!(f, "{val:.1}M")
         } else if bytes >= KB {
-            write!(f, "{:.1}K", bytes as f64 / KB as f64)
+            #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+            let val = bytes as f64 / KB as f64;
+            write!(f, "{val:.1}K")
         } else {
             write!(f, "{bytes}B")
         }

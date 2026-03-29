@@ -385,7 +385,6 @@ pub struct CopyState {
 }
 
 impl CopyState {
-    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
     pub fn speed(&self) -> f64 {
         let window = std::time::Duration::from_secs(10);
         let now = Instant::now();
@@ -399,7 +398,9 @@ impl CopyState {
         if total == 0_u64 {
             return 0.0_f64;
         }
-        total as f64 / window.as_secs_f64()
+        #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+        let total_f64 = total as f64;
+        total_f64 / window.as_secs_f64()
     }
 
     pub fn spinner_char(&self) -> char {
@@ -433,30 +434,33 @@ impl CopyState {
         self.files.get(self.current_index)
     }
 
-    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
     pub fn overall_progress(&self) -> f64 {
         if self.total_bytes == 0_u64 {
             return 0.0_f64;
         }
-        self.copied_bytes as f64 / self.total_bytes as f64
+        #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+        let ratio = self.copied_bytes as f64 / self.total_bytes as f64;
+        ratio
     }
 
-    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
     pub fn current_progress(&self) -> f64 {
         if self.current_file_size == 0_u64 {
             return 0.0_f64;
         }
-        self.current_file_copied as f64 / self.current_file_size as f64
+        #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+        let ratio = self.current_file_copied as f64 / self.current_file_size as f64;
+        ratio
     }
 
-    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
     pub fn eta_secs(&self) -> Option<f64> {
         let speed = self.speed();
         if speed <= 0.0_f64 {
             return None;
         }
         let remaining = self.total_bytes.saturating_sub(self.copied_bytes);
-        Some(remaining as f64 / speed)
+        #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+        let remaining_f64 = remaining as f64;
+        Some(remaining_f64 / speed)
     }
 }
 
@@ -554,96 +558,99 @@ impl Model {
     }
 }
 
-#[allow(clippy::too_many_lines)]
 pub fn update(model: &mut Model, msg: Msg) -> Effect {
-    use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
-
     match msg {
         Msg::Resize(w, h) => {
             model.terminal_size = (w, h);
             Effect::None
         }
-
-        Msg::Key(key) => {
-            if key.kind != KeyEventKind::Press {
-                return Effect::None;
-            }
-
-            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                if let Phase::Scanning { config, .. } = &model.phase {
-                    model.shutdown.store(true, Ordering::Release);
-                    let form = SetupForm::from_config(config, model.locale);
-                    model.phase = Phase::Setup(form);
-                    model.shutdown = Arc::new(AtomicBool::new(false));
-                    model.ctrl_c_at = None;
-                    return Effect::None;
-                }
-                if let Phase::Copying(_) = &model.phase {
-                    let now = Instant::now();
-                    if model
-                        .ctrl_c_at
-                        .is_some_and(|t| now.duration_since(t).as_millis() < 1000_u128)
-                    {
-                        model.shutdown.store(true, Ordering::Release);
-                        model.should_quit = true;
-                        return Effect::Quit;
-                    }
-                    model.ctrl_c_at = Some(now);
-                    return Effect::None;
-                }
-                model.shutdown.store(true, Ordering::Release);
-                model.should_quit = true;
-                return Effect::Quit;
-            }
-
-            let locale = model.locale;
-            match &mut model.phase {
-                Phase::Setup(form) => {
-                    let effect = update_setup(form, key, locale);
-                    if let Effect::StartScan(ref config) = effect {
-                        model.phase = Phase::Scanning {
-                            config: config.clone(),
-                            state: ScanState {
-                                files_found: 0_usize,
-                                files_matched: 0_usize,
-                                last_path: None,
-                                spinner_tick: 0_usize,
-                            },
-                        };
-                    }
-                    effect
-                }
-                Phase::Done { .. } | Phase::FatalError(_) => {
-                    if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
-                        model.should_quit = true;
-                        Effect::Quit
-                    } else {
-                        Effect::None
-                    }
-                }
-                _ => Effect::None,
-            }
-        }
-
-        Msg::Tick => {
-            if let Phase::Scanning { state, .. } = &mut model.phase {
-                state.spinner_tick = state.spinner_tick.wrapping_add(1);
-            }
-            if let Phase::Copying(cs) = &mut model.phase {
-                cs.spinner_tick = cs.spinner_tick.wrapping_add(1);
-                let twelve_secs = std::time::Duration::from_secs(12);
-                let cutoff = Instant::now()
-                    .checked_sub(twelve_secs)
-                    .unwrap_or(Instant::now());
-                cs.speed_bytes.retain(|(t, _)| *t >= cutoff);
-            }
-            Effect::None
-        }
-
+        Msg::Key(key) => handle_key(model, key),
+        Msg::Tick => handle_tick(model),
         Msg::Scan(scan_msg) => handle_scan(model, scan_msg),
-
         Msg::Copy(copy_msg) => handle_copy(model, copy_msg),
     }
+}
+
+fn handle_key(model: &mut Model, key: crossterm::event::KeyEvent) -> Effect {
+    use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
+
+    if key.kind != KeyEventKind::Press {
+        return Effect::None;
+    }
+
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return handle_ctrl_c(model);
+    }
+
+    let locale = model.locale;
+    match &mut model.phase {
+        Phase::Setup(form) => {
+            let effect = update_setup(form, key, locale);
+            if let Effect::StartScan(ref config) = effect {
+                model.phase = Phase::Scanning {
+                    config: config.clone(),
+                    state: ScanState {
+                        files_found: 0_usize,
+                        files_matched: 0_usize,
+                        last_path: None,
+                        spinner_tick: 0_usize,
+                    },
+                };
+            }
+            effect
+        }
+        Phase::Done { .. } | Phase::FatalError(_) => {
+            if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
+                model.should_quit = true;
+                Effect::Quit
+            } else {
+                Effect::None
+            }
+        }
+        _ => Effect::None,
+    }
+}
+
+fn handle_ctrl_c(model: &mut Model) -> Effect {
+    if let Phase::Scanning { config, .. } = &model.phase {
+        model.shutdown.store(true, Ordering::Release);
+        let form = SetupForm::from_config(config, model.locale);
+        model.phase = Phase::Setup(form);
+        model.shutdown = Arc::new(AtomicBool::new(false));
+        model.ctrl_c_at = None;
+        return Effect::None;
+    }
+    if let Phase::Copying(_) = &model.phase {
+        let now = Instant::now();
+        if model
+            .ctrl_c_at
+            .is_some_and(|t| now.duration_since(t).as_millis() < 1000_u128)
+        {
+            model.shutdown.store(true, Ordering::Release);
+            model.should_quit = true;
+            return Effect::Quit;
+        }
+        model.ctrl_c_at = Some(now);
+        return Effect::None;
+    }
+    model.shutdown.store(true, Ordering::Release);
+    model.should_quit = true;
+    Effect::Quit
+}
+
+fn handle_tick(model: &mut Model) -> Effect {
+    if let Phase::Scanning { state, .. } = &mut model.phase {
+        state.spinner_tick = state.spinner_tick.wrapping_add(1);
+    }
+    if let Phase::Copying(cs) = &mut model.phase {
+        cs.spinner_tick = cs.spinner_tick.wrapping_add(1);
+        let twelve_secs = std::time::Duration::from_secs(12);
+        let cutoff = Instant::now()
+            .checked_sub(twelve_secs)
+            .unwrap_or(Instant::now());
+        cs.speed_bytes.retain(|(t, _)| *t >= cutoff);
+    }
+    Effect::None
 }
 
 fn handle_scan(model: &mut Model, scan_msg: ScanMsg) -> Effect {
@@ -896,10 +903,9 @@ fn navigate_to_volumes(form: &mut SetupForm) {
         });
     #[cfg(windows)]
     let base: Option<String> = {
-        #[allow(clippy::as_conversions)]
         let drives: Vec<String> = (b'A'..=b'Z')
-            .filter(|&letter| std::path::Path::new(&format!("{}:\\", letter as char)).exists())
-            .map(|letter| format!("{}:{}", letter as char, std::path::MAIN_SEPARATOR))
+            .filter(|&letter| std::path::Path::new(&format!("{}:\\", char::from(letter))).exists())
+            .map(|letter| format!("{}:{}", char::from(letter), std::path::MAIN_SEPARATOR))
             .collect();
         if !drives.is_empty() {
             match form.focused {
@@ -1093,7 +1099,6 @@ fn apply_autocomplete(form: &mut SetupForm) {
     refresh_dropdown(form);
 }
 
-#[allow(clippy::too_many_lines)]
 fn update_setup(
     form: &mut SetupForm,
     key: crossterm::event::KeyEvent,
@@ -1105,40 +1110,8 @@ fn update_setup(
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
     match key.code {
-        KeyCode::Up => {
-            if form.dropdown.visible {
-                form.dropdown.selected = form.dropdown.selected.saturating_sub(1);
-                if form.dropdown.selected < form.dropdown.scroll_offset {
-                    form.dropdown.scroll_offset = form.dropdown.selected;
-                }
-            } else {
-                form.focused = form.focused.prev(form.encoding);
-                form.error = None;
-                form.dropdown.visible = false;
-                form.sync_cursor();
-            }
-            Effect::None
-        }
-        KeyCode::Down => {
-            if form.dropdown.visible {
-                let max = form.dropdown.entries.len().saturating_sub(1);
-                form.dropdown.selected = (form.dropdown.selected.saturating_add(1)).min(max);
-                if form.dropdown.selected
-                    >= form.dropdown.scroll_offset.saturating_add(MAX_DROPDOWN)
-                {
-                    form.dropdown.scroll_offset = form
-                        .dropdown
-                        .selected
-                        .saturating_sub(MAX_DROPDOWN.saturating_sub(1));
-                }
-            } else {
-                form.focused = form.focused.next(form.encoding);
-                form.error = None;
-                form.dropdown.visible = false;
-                form.sync_cursor();
-            }
-            Effect::None
-        }
+        KeyCode::Up => setup_navigate_up(form),
+        KeyCode::Down => setup_navigate_down(form),
         KeyCode::Left if alt && form.focused.is_text() => {
             form.cursor = form.word_boundary_left();
             Effect::None
@@ -1161,111 +1134,177 @@ fn update_setup(
             Effect::None
         }
         KeyCode::Char('e') if ctrl && form.focused.is_text() => {
-            let len = form.focused_value().map_or(0_usize, |v| v.chars().count());
-            form.cursor = len;
+            form.cursor = form.focused_value().map_or(0_usize, |v| v.chars().count());
             Effect::None
         }
         KeyCode::Char('w') if ctrl && form.focused.is_text() => {
-            form.delete_word_before_cursor();
-            if form.focused.is_path() {
-                refresh_dropdown(form);
-            }
+            setup_delete_word(form);
             Effect::None
         }
         KeyCode::Char('d') if ctrl && form.focused.is_path() => {
             navigate_to_volumes(form);
             Effect::None
         }
-        KeyCode::Tab => {
-            if form.focused.is_path() {
-                if form.dropdown.visible {
-                    apply_autocomplete(form);
-                } else {
-                    refresh_dropdown(form);
-                }
-            }
-            Effect::None
-        }
+        KeyCode::Tab => setup_handle_tab(form),
         KeyCode::Esc => {
             form.dropdown.visible = false;
             Effect::None
         }
-        KeyCode::Enter => {
-            if form.focused == SetupField::Start {
-                validate_and_start(form, locale)
-            } else if form.dropdown.visible {
-                apply_autocomplete(form);
-                form.dropdown.visible = false;
-                Effect::None
-            } else {
-                form.focused = form.focused.next(form.encoding);
-                form.sync_cursor();
-                Effect::None
-            }
-        }
+        KeyCode::Enter => setup_handle_enter(form, locale),
         KeyCode::Left if form.focused == SetupField::Encoding => {
-            form.encoding = match form.encoding {
-                Encoding::Keep => Encoding::Vbr,
-                Encoding::Cbr => Encoding::Keep,
-                Encoding::Vbr => Encoding::Cbr,
-            };
+            setup_cycle_encoding_prev(form);
             Effect::None
         }
         KeyCode::Right | KeyCode::Char(' ') if form.focused == SetupField::Encoding => {
-            form.encoding = match form.encoding {
-                Encoding::Keep => Encoding::Cbr,
-                Encoding::Cbr => Encoding::Vbr,
-                Encoding::Vbr => Encoding::Keep,
-            };
+            setup_cycle_encoding_next(form);
             Effect::None
         }
         KeyCode::Left if form.focused == SetupField::Bitrate => {
-            match form.encoding {
-                Encoding::Cbr => form.cbr_bitrate = form.cbr_bitrate.prev(),
-                Encoding::Vbr => form.vbr_quality = form.vbr_quality.prev(),
-                Encoding::Keep => {}
-            }
+            setup_adjust_bitrate_prev(form);
             Effect::None
         }
         KeyCode::Right if form.focused == SetupField::Bitrate => {
-            match form.encoding {
-                Encoding::Cbr => form.cbr_bitrate = form.cbr_bitrate.next(),
-                Encoding::Vbr => form.vbr_quality = form.vbr_quality.next(),
-                Encoding::Keep => {}
-            }
+            setup_adjust_bitrate_next(form);
             Effect::None
         }
         KeyCode::Char(' ') if form.focused.is_checkbox() => {
-            match form.focused {
-                SetupField::NoLive => form.no_live = !form.no_live,
-                SetupField::KeepNames => form.keep_names = !form.keep_names,
-                SetupField::Overwrite => form.overwrite = !form.overwrite,
-                _ => {}
-            }
+            setup_toggle_checkbox(form);
             Effect::None
         }
         KeyCode::Char(c) if form.focused.is_text() => {
-            form.insert_char(c);
-            if form.focused.is_path() {
-                refresh_dropdown(form);
-            }
+            setup_insert_char(form, c);
             Effect::None
         }
         KeyCode::Backspace if alt && form.focused.is_text() => {
-            form.delete_word_before_cursor();
-            if form.focused.is_path() {
-                refresh_dropdown(form);
-            }
+            setup_delete_word(form);
             Effect::None
         }
         KeyCode::Backspace if form.focused.is_text() => {
-            form.delete_char_before_cursor();
-            if form.focused.is_path() {
-                refresh_dropdown(form);
-            }
+            setup_delete_char(form);
             Effect::None
         }
         _ => Effect::None,
+    }
+}
+
+fn setup_handle_tab(form: &mut SetupForm) -> Effect {
+    if form.focused.is_path() {
+        if form.dropdown.visible {
+            apply_autocomplete(form);
+        } else {
+            refresh_dropdown(form);
+        }
+    }
+    Effect::None
+}
+
+fn setup_cycle_encoding_prev(form: &mut SetupForm) {
+    form.encoding = match form.encoding {
+        Encoding::Keep => Encoding::Vbr,
+        Encoding::Cbr => Encoding::Keep,
+        Encoding::Vbr => Encoding::Cbr,
+    };
+}
+
+fn setup_cycle_encoding_next(form: &mut SetupForm) {
+    form.encoding = match form.encoding {
+        Encoding::Keep => Encoding::Cbr,
+        Encoding::Cbr => Encoding::Vbr,
+        Encoding::Vbr => Encoding::Keep,
+    };
+}
+
+fn setup_insert_char(form: &mut SetupForm, c: char) {
+    form.insert_char(c);
+    if form.focused.is_path() {
+        refresh_dropdown(form);
+    }
+}
+
+fn setup_delete_word(form: &mut SetupForm) {
+    form.delete_word_before_cursor();
+    if form.focused.is_path() {
+        refresh_dropdown(form);
+    }
+}
+
+fn setup_delete_char(form: &mut SetupForm) {
+    form.delete_char_before_cursor();
+    if form.focused.is_path() {
+        refresh_dropdown(form);
+    }
+}
+
+fn setup_navigate_up(form: &mut SetupForm) -> Effect {
+    if form.dropdown.visible {
+        form.dropdown.selected = form.dropdown.selected.saturating_sub(1);
+        if form.dropdown.selected < form.dropdown.scroll_offset {
+            form.dropdown.scroll_offset = form.dropdown.selected;
+        }
+    } else {
+        form.focused = form.focused.prev(form.encoding);
+        form.error = None;
+        form.dropdown.visible = false;
+        form.sync_cursor();
+    }
+    Effect::None
+}
+
+fn setup_navigate_down(form: &mut SetupForm) -> Effect {
+    if form.dropdown.visible {
+        let max = form.dropdown.entries.len().saturating_sub(1);
+        form.dropdown.selected = (form.dropdown.selected.saturating_add(1)).min(max);
+        if form.dropdown.selected >= form.dropdown.scroll_offset.saturating_add(MAX_DROPDOWN) {
+            form.dropdown.scroll_offset = form
+                .dropdown
+                .selected
+                .saturating_sub(MAX_DROPDOWN.saturating_sub(1));
+        }
+    } else {
+        form.focused = form.focused.next(form.encoding);
+        form.error = None;
+        form.dropdown.visible = false;
+        form.sync_cursor();
+    }
+    Effect::None
+}
+
+fn setup_handle_enter(form: &mut SetupForm, locale: &'static Locale) -> Effect {
+    if form.focused == SetupField::Start {
+        validate_and_start(form, locale)
+    } else if form.dropdown.visible {
+        apply_autocomplete(form);
+        form.dropdown.visible = false;
+        Effect::None
+    } else {
+        form.focused = form.focused.next(form.encoding);
+        form.sync_cursor();
+        Effect::None
+    }
+}
+
+fn setup_adjust_bitrate_prev(form: &mut SetupForm) {
+    match form.encoding {
+        Encoding::Cbr => form.cbr_bitrate = form.cbr_bitrate.prev(),
+        Encoding::Vbr => form.vbr_quality = form.vbr_quality.prev(),
+        Encoding::Keep => {}
+    }
+}
+
+fn setup_adjust_bitrate_next(form: &mut SetupForm) {
+    match form.encoding {
+        Encoding::Cbr => form.cbr_bitrate = form.cbr_bitrate.next(),
+        Encoding::Vbr => form.vbr_quality = form.vbr_quality.next(),
+        Encoding::Keep => {}
+    }
+}
+
+fn setup_toggle_checkbox(form: &mut SetupForm) {
+    match form.focused {
+        SetupField::NoLive => form.no_live = !form.no_live,
+        SetupField::KeepNames => form.keep_names = !form.keep_names,
+        SetupField::Overwrite => form.overwrite = !form.overwrite,
+        _ => {}
     }
 }
 
