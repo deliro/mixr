@@ -29,6 +29,8 @@ pub fn run(config: &Config, locale: &'static Locale) -> Result<bool, Error> {
     );
 
     let source = config.source.clone();
+    let needs_probe =
+        config.min_duration.is_some() || config.encoding != crate::types::Encoding::Keep;
     let scan_tx = tx.clone();
     let scan_shutdown = Arc::clone(&model.shutdown);
     thread::spawn(move || {
@@ -40,7 +42,7 @@ pub fn run(config: &Config, locale: &'static Locale) -> Result<bool, Error> {
                 }
             }
         });
-        scanner::scan(&source, &filters, budget, &stx, &scan_shutdown);
+        scanner::scan(&source, &filters, budget, needs_probe, &stx, &scan_shutdown);
     });
 
     let _ = write!(

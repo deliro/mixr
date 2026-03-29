@@ -25,6 +25,7 @@ pub fn scan(
     source: &Path,
     filters: &FilterSet,
     budget: u64,
+    needs_probe: bool,
     tx: &Sender<ScanMsg>,
     shutdown: &Arc<AtomicBool>,
 ) {
@@ -61,7 +62,7 @@ pub fn scan(
         };
         let size = meta.len();
 
-        let audio_meta = if filters.matches_extension(&path) {
+        let audio_meta = if needs_probe && filters.matches_extension(&path) {
             probe::probe(&path)
         } else {
             probe::AudioMeta {
@@ -150,7 +151,7 @@ mod tests {
         );
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
-        scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
+        scan(dir.path(), &filters, u64::MAX, false, &tx, &shutdown);
 
         let mut messages: Vec<ScanMsg> = rx.try_iter().collect();
         let complete = messages.pop().unwrap();
@@ -175,7 +176,7 @@ mod tests {
         );
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
-        scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
+        scan(dir.path(), &filters, u64::MAX, false, &tx, &shutdown);
 
         let messages: Vec<ScanMsg> = rx.try_iter().collect();
         let complete = messages.last().unwrap();
@@ -200,7 +201,7 @@ mod tests {
         let filters = FilterSet::new(vec!["mp3".to_string()], Some(ByteSize(1000)), None, false);
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
-        scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
+        scan(dir.path(), &filters, u64::MAX, false, &tx, &shutdown);
 
         let messages: Vec<ScanMsg> = rx.try_iter().collect();
         let complete = messages.last().unwrap();
@@ -267,7 +268,7 @@ mod tests {
         let shutdown = Arc::new(AtomicBool::new(false));
         let filters = FilterSet::new(vec!["wav".to_string()], None, None, false);
 
-        scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
+        scan(dir.path(), &filters, u64::MAX, true, &tx, &shutdown);
 
         let mut found_duration = false;
         for msg in rx.iter() {
