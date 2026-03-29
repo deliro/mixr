@@ -11,7 +11,6 @@ use crate::types::{ByteSize, Config, Encoding, FileEntry, VbrQuality};
 
 const BUF_SIZE: usize = 1024 * 1024;
 const PIPE_CAPACITY: usize = 16_usize;
-const TRANSCODE_BUF_THRESHOLD: usize = 256 * 1024;
 
 pub enum CopyMsg {
     Preparing {
@@ -225,35 +224,28 @@ fn transcode_file(
         .unwrap_or("unknown")
         .to_string();
 
-    let _ = pipe_tx.send(PipeMsg::StartFile {
-        index,
-        dest_path,
-        name,
-        original_path: entry.path.clone(),
-        size: entry.size,
-    });
-
     let tc_config = crate::transcoder::TranscodeConfig {
         encoding: config.encoding,
         cbr_bitrate: config.cbr_bitrate,
         vbr_quality: config.vbr_quality,
     };
 
-    let mut transcode_buf: Vec<u8> = Vec::with_capacity(TRANSCODE_BUF_THRESHOLD);
+    let mut encoded = Vec::new();
     let result = crate::transcoder::transcode(&entry.path, &tc_config, &mut |chunk| {
-        transcode_buf.extend_from_slice(chunk);
-        if transcode_buf.len() >= TRANSCODE_BUF_THRESHOLD {
-            let full_buf = std::mem::replace(
-                &mut transcode_buf,
-                Vec::with_capacity(TRANSCODE_BUF_THRESHOLD),
-            );
-            let _ = pipe_tx.send(PipeMsg::Chunk(full_buf));
-        }
+        encoded.extend_from_slice(chunk);
     });
+
     match result {
         Ok(()) => {
-            if !transcode_buf.is_empty() {
-                let _ = pipe_tx.send(PipeMsg::Chunk(transcode_buf));
+            let _ = pipe_tx.send(PipeMsg::StartFile {
+                index,
+                dest_path,
+                name,
+                original_path: entry.path.clone(),
+                size: entry.size,
+            });
+            for chunk in encoded.chunks(BUF_SIZE) {
+                let _ = pipe_tx.send(PipeMsg::Chunk(chunk.to_vec()));
             }
             let _ = pipe_tx.send(PipeMsg::EndFile { index });
         }

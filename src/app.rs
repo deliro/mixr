@@ -171,6 +171,45 @@ impl Default for SetupForm {
 }
 
 impl SetupForm {
+    fn from_config(config: &Config, _locale: &Locale) -> Self {
+        let cbr_bitrate_idx = config
+            .cbr_bitrate
+            .and_then(|br| BITRATE_OPTIONS.iter().position(|&o| o == br))
+            .unwrap_or(0_usize);
+        Self {
+            source: config.source.to_str().unwrap_or("").to_string(),
+            destination: config.destination.to_str().unwrap_or("").to_string(),
+            size: config.max_size.map_or_else(String::new, |s| format!("{s}")),
+            min_size: config
+                .min_file_size
+                .map_or_else(String::new, |s| format!("{s}")),
+            min_duration: config.min_duration.map_or_else(String::new, |d| {
+                let secs = d.as_secs();
+                let m = secs / 60_u64;
+                let s = secs % 60_u64;
+                if m > 0_u64 && s > 0_u64 {
+                    format!("{m}m{s}s")
+                } else if m > 0_u64 {
+                    format!("{m}m")
+                } else {
+                    format!("{secs}s")
+                }
+            }),
+            extensions: config.allowed_extensions.join(", "),
+            exclude: String::new(),
+            encoding: config.encoding,
+            cbr_bitrate_idx,
+            vbr_quality: config.vbr_quality.unwrap_or(VbrQuality::High),
+            no_live: config.no_live,
+            keep_names: config.keep_names,
+            overwrite: config.overwrite,
+            focused: SetupField::Source,
+            error: None,
+            dropdown: Dropdown::default(),
+            cursor: 0_usize,
+        }
+    }
+
     pub fn focused_value(&self) -> Option<&str> {
         match self.focused {
             SetupField::Source => Some(&self.source),
@@ -533,6 +572,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
             }
 
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                if let Phase::Scanning { config, .. } = &model.phase {
+                    model.shutdown.store(true, Ordering::Release);
+                    let form = SetupForm::from_config(config, model.locale);
+                    model.phase = Phase::Setup(form);
+                    model.shutdown = Arc::new(AtomicBool::new(false));
+                    return Effect::None;
+                }
                 model.shutdown.store(true, Ordering::Release);
                 model.should_quit = true;
                 return Effect::Quit;
