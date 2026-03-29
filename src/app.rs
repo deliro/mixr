@@ -1135,8 +1135,10 @@ fn update_setup(
         KeyCode::Enter => {
             if form.focused == SetupField::Start {
                 validate_and_start(form, locale)
+            } else if form.dropdown.visible {
+                apply_autocomplete(form);
+                Effect::None
             } else {
-                form.dropdown.visible = false;
                 form.focused = form.focused.next(form.encoding);
                 form.sync_cursor();
                 Effect::None
