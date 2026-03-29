@@ -153,7 +153,12 @@ fn view(model: &Model, frame: &mut Frame) {
         Phase::Scanning { config, state } => {
             view_scanning(config, state, model, locale, frame, area);
         }
-        Phase::Copying(cs) => view_copying(cs, locale, frame, area),
+        Phase::Copying(cs) => {
+            let confirm_quit = model
+                .ctrl_c_at
+                .is_some_and(|t| t.elapsed().as_millis() < 1000_u128);
+            view_copying(cs, locale, confirm_quit, frame, area);
+        }
         Phase::Done {
             total_files,
             total_bytes,
@@ -563,7 +568,13 @@ fn encoding_label(cs: &CopyState, locale: &Locale) -> String {
 }
 
 #[allow(clippy::too_many_lines)]
-fn view_copying(cs: &CopyState, locale: &Locale, frame: &mut Frame, area: Rect) {
+fn view_copying(
+    cs: &CopyState,
+    locale: &Locale,
+    confirm_quit: bool,
+    frame: &mut Frame,
+    area: Rect,
+) {
     let enc = encoding_label(cs, locale);
     let block = Block::bordered().title(format!(" mixr - {} \u{2014} {enc} ", locale.copying));
     let inner = block.inner(area);
@@ -697,10 +708,17 @@ fn view_copying(cs: &CopyState, locale: &Locale, frame: &mut Frame, area: Rect) 
         }
     }
 
-    let help = Line::from(Span::styled(
-        locale.ctrl_c_stop,
-        Style::default().fg(Color::DarkGray),
-    ));
+    let help = if confirm_quit {
+        Line::from(Span::styled(
+            "Press Ctrl+C again to stop",
+            Style::default().fg(Color::Red),
+        ))
+    } else {
+        Line::from(Span::styled(
+            locale.ctrl_c_stop,
+            Style::default().fg(Color::DarkGray),
+        ))
+    };
     if let Some(chunk) = chunks.get(6) {
         frame.render_widget(Paragraph::new(help), *chunk);
     }

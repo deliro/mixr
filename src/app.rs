@@ -487,6 +487,7 @@ pub struct Model {
     pub should_quit: bool,
     pub shutdown: Arc<AtomicBool>,
     pub locale: &'static Locale,
+    pub ctrl_c_at: Option<Instant>,
 }
 
 pub enum Msg {
@@ -520,6 +521,7 @@ impl Model {
             should_quit: false,
             shutdown: Arc::new(AtomicBool::new(false)),
             locale: i18n::detect(),
+            ctrl_c_at: None,
         }
     }
 
@@ -538,6 +540,7 @@ impl Model {
             should_quit: false,
             shutdown: Arc::new(AtomicBool::new(false)),
             locale,
+            ctrl_c_at: None,
         }
     }
 
@@ -577,6 +580,20 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                     let form = SetupForm::from_config(config, model.locale);
                     model.phase = Phase::Setup(form);
                     model.shutdown = Arc::new(AtomicBool::new(false));
+                    model.ctrl_c_at = None;
+                    return Effect::None;
+                }
+                if let Phase::Copying(_) = &model.phase {
+                    let now = Instant::now();
+                    if model
+                        .ctrl_c_at
+                        .is_some_and(|t| now.duration_since(t).as_millis() < 1000_u128)
+                    {
+                        model.shutdown.store(true, Ordering::Release);
+                        model.should_quit = true;
+                        return Effect::Quit;
+                    }
+                    model.ctrl_c_at = Some(now);
                     return Effect::None;
                 }
                 model.shutdown.store(true, Ordering::Release);
