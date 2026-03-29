@@ -11,14 +11,15 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Gauge, List, ListItem, Paragraph, Wrap};
 
 use crate::app::{
-    CopyState, Effect, FileStatus, MAX_HISTORY, MAX_UPCOMING, Model, Msg, Phase, ScanState,
-    SetupField, SetupForm, dest_existing_prefix_len, field_is_invalid, format_ext_list, update,
+    BITRATE_OPTIONS, CopyState, Effect, FileStatus, MAX_HISTORY, MAX_UPCOMING, Model, Msg, Phase,
+    ScanState, SetupField, SetupForm, dest_existing_prefix_len, field_is_invalid, format_ext_list,
+    update,
 };
 use crate::copier;
 use crate::filters::FilterSet;
 use crate::i18n::Locale;
 use crate::scanner;
-use crate::types::{ByteSize, Config, Error, format_duration};
+use crate::types::{ByteSize, Config, Encoding, Error, VbrQuality, format_duration};
 
 const TICK_RATE: Duration = Duration::from_millis(50);
 
@@ -182,17 +183,20 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
         Constraint::Length(1), // 1: Destination
         Constraint::Length(1), // 2: Size
         Constraint::Length(1), // 3: MinSize
-        Constraint::Length(1), // 4: Extensions
-        Constraint::Length(1), // 5: Exclude
-        Constraint::Length(1), // 6: NoLive
-        Constraint::Length(1), // 7: KeepNames
-        Constraint::Length(1), // 8: Overwrite
-        Constraint::Length(1), // 9: blank
-        Constraint::Length(1), // 10: Start
-        Constraint::Min(0),    // 11: spacer
-        Constraint::Length(1), // 12: help
+        Constraint::Length(1), // 4: MinDuration
+        Constraint::Length(1), // 5: Extensions
+        Constraint::Length(1), // 6: Exclude
+        Constraint::Length(1), // 7: Encoding
+        Constraint::Length(1), // 8: Bitrate/Quality
+        Constraint::Length(1), // 9: NoLive
+        Constraint::Length(1), // 10: KeepNames
+        Constraint::Length(1), // 11: Overwrite
+        Constraint::Length(1), // 12: blank
+        Constraint::Length(1), // 13: Start
+        Constraint::Min(0),    // 14: spacer
+        Constraint::Length(1), // 15: help
     ])
-    .areas::<13>(inner);
+    .areas::<16>(inner);
 
     let label_width = 14_usize;
     let fields: &[(SetupField, &str, &str)] = &[
@@ -204,6 +208,11 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
         ),
         (SetupField::Size, locale.size, &form.size),
         (SetupField::MinSize, locale.min_size, &form.min_size),
+        (
+            SetupField::MinDuration,
+            locale.min_duration,
+            &form.min_duration,
+        ),
         (SetupField::Extensions, locale.extensions, &form.extensions),
         (SetupField::Exclude, locale.exclude, &form.exclude),
     ];
@@ -320,19 +329,76 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
         }
     }
 
+    let encoding_value = match form.encoding {
+        Encoding::Keep => locale.keep_original,
+        Encoding::Cbr => "CBR",
+        Encoding::Vbr => "VBR",
+    };
+    let encoding_style = if form.focused == SetupField::Encoding {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+    let encoding_line = Line::from(vec![
+        Span::styled(
+            format!("{:<label_width$}", locale.encoding_label),
+            encoding_style,
+        ),
+        Span::styled(
+            format!("\u{25c0} {encoding_value} \u{25b6}"),
+            encoding_style,
+        ),
+    ]);
+    if let Some(chunk) = chunks.get(7) {
+        frame.render_widget(Paragraph::new(encoding_line), *chunk);
+    }
+
+    let bitrate_info = match form.encoding {
+        Encoding::Cbr => {
+            let br = BITRATE_OPTIONS
+                .get(form.cbr_bitrate_idx)
+                .copied()
+                .unwrap_or(192);
+            Some((locale.bitrate_label, format!("\u{25c0} {br} kbps \u{25b6}")))
+        }
+        Encoding::Vbr => {
+            let q = match form.vbr_quality {
+                VbrQuality::High => locale.quality_high,
+                VbrQuality::Medium => locale.quality_medium,
+                VbrQuality::Low => locale.quality_low,
+            };
+            Some((locale.quality_label, format!("\u{25c0} {q} \u{25b6}")))
+        }
+        Encoding::Keep => None,
+    };
+    if let Some((label, value)) = bitrate_info {
+        let bitrate_style = if form.focused == SetupField::Bitrate {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default()
+        };
+        let bitrate_line = Line::from(vec![
+            Span::styled(format!("{label:<label_width$}"), bitrate_style),
+            Span::styled(value, bitrate_style),
+        ]);
+        if let Some(chunk) = chunks.get(8) {
+            frame.render_widget(Paragraph::new(bitrate_line), *chunk);
+        }
+    }
+
     let checkboxes: &[(SetupField, &str, bool, usize)] = &[
-        (SetupField::NoLive, locale.no_live, form.no_live, 6_usize),
+        (SetupField::NoLive, locale.no_live, form.no_live, 9_usize),
         (
             SetupField::KeepNames,
             locale.keep_names,
             form.keep_names,
-            7_usize,
+            10_usize,
         ),
         (
             SetupField::Overwrite,
             locale.overwrite,
             form.overwrite,
-            8_usize,
+            11_usize,
         ),
     ];
     for &(field, label, checked, row) in checkboxes {
@@ -361,7 +427,7 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
         Style::default().fg(Color::White)
     };
     let start = Line::from(Span::styled(format!(" [ {} ] ", locale.start), start_style));
-    if let Some(chunk) = chunks.get(10) {
+    if let Some(chunk) = chunks.get(13) {
         frame.render_widget(Paragraph::new(start).alignment(Alignment::Center), *chunk);
     }
 
@@ -373,7 +439,7 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
             Style::default().fg(Color::DarkGray),
         ))
     };
-    if let Some(chunk) = chunks.get(12) {
+    if let Some(chunk) = chunks.get(15) {
         frame.render_widget(Paragraph::new(help), *chunk);
     }
 
@@ -499,7 +565,7 @@ fn view_copying(cs: &CopyState, locale: &Locale, frame: &mut Frame, area: Rect) 
     ])
     .areas::<6>(inner);
 
-    render_file_list(cs, frame, chunks[0_usize]);
+    render_file_list(cs, locale, frame, chunks[0_usize]);
 
     let current_pct = format!(
         "{:.0}%",
@@ -606,7 +672,7 @@ const HISTORY_GREENS: &[Color] = &[
     Color::Rgb(0, 100, 0),
 ];
 
-fn render_file_list(cs: &CopyState, frame: &mut Frame, area: Rect) {
+fn render_file_list(cs: &CopyState, locale: &Locale, frame: &mut Frame, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
     let upcoming: Vec<_> = cs.upcoming().collect();
@@ -614,10 +680,24 @@ fn render_file_list(cs: &CopyState, frame: &mut Frame, area: Rect) {
         std::iter::repeat_with(|| Line::from("")).take(MAX_UPCOMING.saturating_sub(upcoming.len())),
     );
     lines.extend(upcoming.iter().rev().map(|item| {
-        Line::from(Span::styled(
-            format!("  {}", item.name),
-            Style::default().fg(Color::DarkGray),
-        ))
+        let (suffix, style) = match item.status {
+            FileStatus::Reading => (
+                format!("   {}", locale.preparing),
+                Style::default().fg(Color::Yellow),
+            ),
+            FileStatus::Converting => (
+                format!("   {}", locale.converting),
+                Style::default().fg(Color::Yellow),
+            ),
+            _ => (String::new(), Style::default().fg(Color::DarkGray)),
+        };
+        Line::from(vec![
+            Span::styled(
+                format!("  {}", item.name),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(suffix, style),
+        ])
     }));
 
     if let Some(cur) = cs.current() {

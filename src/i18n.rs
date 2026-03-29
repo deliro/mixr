@@ -52,31 +52,19 @@ pub struct Locale {
     #[allow(dead_code)]
     pub about: &'static str,
 
-    #[allow(dead_code)]
     pub min_duration: &'static str,
-    #[allow(dead_code)]
     pub encoding_label: &'static str,
-    #[allow(dead_code)]
     pub bitrate_label: &'static str,
-    #[allow(dead_code)]
     pub quality_label: &'static str,
-    #[allow(dead_code)]
     pub ph_min_duration: &'static str,
-    #[allow(dead_code)]
     pub keep_original: &'static str,
-    #[allow(dead_code)]
     pub quality_high: &'static str,
-    #[allow(dead_code)]
     pub quality_medium: &'static str,
-    #[allow(dead_code)]
     pub quality_low: &'static str,
-    #[allow(dead_code)]
     pub err_invalid_duration: &'static str,
     #[allow(dead_code)]
     pub err_bitrate_required: &'static str,
-    #[allow(dead_code)]
     pub preparing: &'static str,
-    #[allow(dead_code)]
     pub converting: &'static str,
 
     pub err_source_not_found: &'static str,
