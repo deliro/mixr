@@ -369,7 +369,6 @@ pub struct ScanState {
 
 #[derive(Debug)]
 pub struct CopyState {
-    #[allow(dead_code)]
     pub config: Config,
     pub files: Vec<FileItem>,
     pub current_index: usize,
@@ -717,10 +716,6 @@ fn handle_scan(model: &mut Model, scan_msg: ScanMsg) -> Effect {
 
             model.phase = Phase::Copying(copy_state);
             Effect::StartCopy { files, config }
-        }
-        ScanMsg::Error(e) => {
-            model.phase = Phase::FatalError(e);
-            Effect::None
         }
     }
 }
@@ -1568,7 +1563,6 @@ mod tests {
         let files = vec![FileEntry {
             path: PathBuf::from("/src/a.mp3"),
             size: ByteSize(1000),
-            duration: None,
             bitrate_kbps: None,
         }];
 
@@ -1597,7 +1591,6 @@ mod tests {
         let files = vec![FileEntry {
             path: PathBuf::from("/src/a.mp3"),
             size: ByteSize(1000),
-            duration: None,
             bitrate_kbps: None,
         }];
         update(&mut model, Msg::Scan(ScanMsg::Complete(files)));
@@ -1643,7 +1636,6 @@ mod tests {
         let files = vec![FileEntry {
             path: PathBuf::from("/src/a.mp3"),
             size: ByteSize(1000),
-            duration: None,
             bitrate_kbps: None,
         }];
         update(&mut model, Msg::Scan(ScanMsg::Complete(files)));
@@ -1672,7 +1664,6 @@ mod tests {
         let files = vec![FileEntry {
             path: PathBuf::from("/src/a.mp3"),
             size: ByteSize(1000),
-            duration: None,
             bitrate_kbps: None,
         }];
         update(&mut model, Msg::Scan(ScanMsg::Complete(files)));
@@ -1761,7 +1752,6 @@ mod tests {
         let files = vec![FileEntry {
             path: PathBuf::from("/src/a.mp3"),
             size: ByteSize(1000),
-            duration: None,
             bitrate_kbps: None,
         }];
         let items: Vec<FileItem> = files

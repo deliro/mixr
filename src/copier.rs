@@ -524,13 +524,11 @@ mod tests {
             FileEntry {
                 path: f1,
                 size: ByteSize(5000),
-                duration: None,
                 bitrate_kbps: None,
             },
             FileEntry {
                 path: f2,
                 size: ByteSize(3000),
-                duration: None,
                 bitrate_kbps: None,
             },
         ]
@@ -586,7 +584,6 @@ mod tests {
         let files = vec![FileEntry {
             path: f1,
             size: ByteSize(100),
-            duration: None,
             bitrate_kbps: None,
         }];
         let config = keep_config(src.path(), dst.path(), true, false);
@@ -604,7 +601,6 @@ mod tests {
         let files = vec![FileEntry {
             path: PathBuf::from("/nonexistent/song.mp3"),
             size: ByteSize(100),
-            duration: None,
             bitrate_kbps: None,
         }];
         let config = keep_config(Path::new("/nonexistent"), dst.path(), false, false);
@@ -652,7 +648,6 @@ mod tests {
         let files = vec![FileEntry {
             path: wav_path,
             size: ByteSize(176_400),
-            duration: Some(std::time::Duration::from_secs(1)),
             bitrate_kbps: Some(1411),
         }];
 
@@ -703,7 +698,6 @@ mod tests {
         let files = vec![FileEntry {
             path: mp3_path,
             size: ByteSize(1000),
-            duration: Some(std::time::Duration::from_secs(10)),
             bitrate_kbps: Some(128),
         }];
 

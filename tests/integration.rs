@@ -57,7 +57,6 @@ fn copy_real_mp3_without_transcoding() {
     let files = vec![FileEntry {
         path: mp3.clone(),
         size: ByteSize(original_size),
-        duration: meta.duration,
         bitrate_kbps: meta.bitrate_kbps,
     }];
 
@@ -146,7 +145,6 @@ fn copy_real_mp3_with_cbr_reencoding() {
     let files = vec![FileEntry {
         path: mp3.clone(),
         size: ByteSize(original_size),
-        duration: meta.duration,
         bitrate_kbps: meta.bitrate_kbps,
     }];
 
@@ -194,7 +192,6 @@ fn copy_real_mp3_below_threshold_copies_as_is() {
     let files = vec![FileEntry {
         path: mp3.clone(),
         size: ByteSize(original_size),
-        duration: meta.duration,
         bitrate_kbps: meta.bitrate_kbps,
     }];
 

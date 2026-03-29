@@ -12,13 +12,8 @@ use crate::probe;
 use crate::types::{ByteSize, FileEntry};
 
 pub enum ScanMsg {
-    FileFound {
-        path: PathBuf,
-        matched: bool,
-    },
+    FileFound { path: PathBuf, matched: bool },
     Complete(Vec<FileEntry>),
-    #[allow(dead_code)]
-    Error(String),
 }
 
 pub fn scan(
@@ -92,7 +87,6 @@ pub fn scan(
             entries.push(FileEntry {
                 path,
                 size: ByteSize(size),
-                duration: audio_meta.duration,
                 bitrate_kbps: audio_meta.bitrate_kbps,
             });
         }
@@ -235,19 +229,16 @@ mod tests {
             FileEntry {
                 path: PathBuf::from("a.mp3"),
                 size: ByteSize(5000),
-                duration: None,
                 bitrate_kbps: None,
             },
             FileEntry {
                 path: PathBuf::from("b.mp3"),
                 size: ByteSize(3000),
-                duration: None,
                 bitrate_kbps: None,
             },
             FileEntry {
                 path: PathBuf::from("c.mp3"),
                 size: ByteSize(4000),
-                duration: None,
                 bitrate_kbps: None,
             },
         ];
@@ -262,7 +253,6 @@ mod tests {
         let files = vec![FileEntry {
             path: PathBuf::from("huge.mp3"),
             size: ByteSize(1_000_000),
-            duration: None,
             bitrate_kbps: None,
         }];
         let selected = pack_into_budget(files, 100);
@@ -270,31 +260,32 @@ mod tests {
     }
 
     #[test]
-    fn scan_populates_duration() {
+    fn scan_min_duration_filters_short_files() {
         let dir = tempfile::tempdir().unwrap();
-        let wav_path = dir.path().join("test.wav");
-        crate::probe::tests::create_wav(&wav_path, 44100, 2, 3);
+        let short_path = dir.path().join("short.wav");
+        let long_path = dir.path().join("long.wav");
+        crate::probe::tests::create_wav(&short_path, 44100, 2, 1);
+        crate::probe::tests::create_wav(&long_path, 44100, 2, 10);
 
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
         let filters = FilterSet::new(
             vec!["wav".to_string()],
             None,
-            Some(std::time::Duration::from_secs(1)),
+            Some(std::time::Duration::from_secs(5)),
             false,
         );
 
         scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
 
-        let mut found_duration = false;
-        for msg in rx.iter() {
-            if let ScanMsg::Complete(files) = msg {
-                if let Some(f) = files.first() {
-                    found_duration = f.duration.is_some();
-                }
-                break;
+        let messages: Vec<ScanMsg> = rx.try_iter().collect();
+        let complete = messages.last().unwrap();
+        match complete {
+            ScanMsg::Complete(files) => {
+                assert_eq!(files.len(), 1);
+                assert!(files[0].path.ends_with("long.wav"));
             }
+            _ => panic!("expected Complete"),
         }
-        assert!(found_duration);
     }
 }
