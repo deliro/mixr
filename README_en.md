@@ -64,16 +64,28 @@ mixr ~/Music /Volumes/USB --keep-names
 
 # Overwrite existing files on the drive
 mixr ~/Music /Volumes/USB --overwrite
+
+# Convert everything to MP3 CBR 192 kbps
+mixr ~/Music /Volumes/USB --encoding cbr --bitrate 192
+
+# Convert to VBR medium quality (~190 kbps)
+mixr ~/Music /Volumes/USB --encoding vbr --quality medium
+
+# Skip tracks shorter than 30 seconds
+mixr ~/Music /Volumes/USB --min-duration 30s
 ```
 
 ## Features
 
 - Random file selection from libraries of any nesting depth
 - Automatic free space detection on target drive
+- On-the-fly MP3 transcoding (CBR or VBR) — FLAC, WAV, OGG, M4A and other formats are converted during copy; MP3 files above the bitrate threshold are automatically reencoded
+- Double buffering — parallel read/transcode and write, no pauses between files
 - Sequential renaming for shuffled playback order (00001.mp3, 00002.mp3, ...)
 - Skips occupied numbers when files already exist on the drive
-- Filtering by extension, file size, and "live" in filename
+- Filtering by extension, file size, duration, and "live" in filename
 - Supported formats: mp3, flac, ogg, wav, m4a, aac, wma (configurable)
+- Single binary, no external dependencies (LAME statically linked)
 - Cross-platform: Linux, macOS, Windows
 
 ## Environment variables
