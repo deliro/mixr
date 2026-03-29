@@ -100,8 +100,6 @@ fn spawn_scanner(config: &Config, tx: mpsc::Sender<Msg>, model: &Model) {
         config.no_live,
     );
     let source = config.source.clone();
-    let needs_probe =
-        config.min_duration.is_some() || config.encoding != crate::types::Encoding::Keep;
 
     thread::spawn(move || {
         let scan_tx = {
@@ -116,7 +114,7 @@ fn spawn_scanner(config: &Config, tx: mpsc::Sender<Msg>, model: &Model) {
             });
             stx
         };
-        scanner::scan(&source, &filters, budget, needs_probe, &scan_tx, &shutdown);
+        scanner::scan(&source, &filters, budget, &scan_tx, &shutdown);
     });
 }
 

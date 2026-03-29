@@ -3,6 +3,12 @@ use std::time::Duration;
 
 use crate::types::ByteSize;
 
+pub enum FilterResult {
+    Pass,
+    Reject,
+    NeedsDuration,
+}
+
 pub struct FilterSet {
     allowed_extensions: Vec<String>,
     min_size: Option<ByteSize>,
@@ -25,11 +31,17 @@ impl FilterSet {
         }
     }
 
-    pub fn matches(&self, path: &Path, size: u64, duration: Option<Duration>) -> bool {
-        self.matches_extension(path)
-            && self.matches_min_size(size)
-            && self.matches_min_duration(duration)
-            && self.matches_live(path)
+    pub fn check(&self, path: &Path, size: u64, duration: Option<Duration>) -> FilterResult {
+        if !self.matches_extension(path) || !self.matches_min_size(size) || !self.matches_live(path)
+        {
+            return FilterResult::Reject;
+        }
+
+        match (self.min_duration, duration) {
+            (Some(min), Some(d)) if d < min => FilterResult::Reject,
+            (Some(_), None) => FilterResult::NeedsDuration,
+            _ => FilterResult::Pass,
+        }
     }
 
     pub fn matches_extension(&self, path: &Path) -> bool {
@@ -47,13 +59,6 @@ impl FilterSet {
         match self.min_size {
             Some(min) => size >= min.as_u64(),
             None => true,
-        }
-    }
-
-    fn matches_min_duration(&self, duration: Option<Duration>) -> bool {
-        match (self.min_duration, duration) {
-            (Some(min), Some(d)) => d >= min,
-            _ => true,
         }
     }
 
@@ -115,58 +120,126 @@ mod tests {
             None,
             false,
         );
-        assert!(f.matches(Path::new("/music/song.mp3"), 1000, None));
-        assert!(f.matches(Path::new("/music/song.FLAC"), 1000, None));
-        assert!(!f.matches(Path::new("/music/song.wav"), 1000, None));
-        assert!(!f.matches(Path::new("/music/noext"), 1000, None));
+        assert!(matches!(
+            f.check(Path::new("/music/song.mp3"), 1000, None),
+            FilterResult::Pass
+        ));
+        assert!(matches!(
+            f.check(Path::new("/music/song.FLAC"), 1000, None),
+            FilterResult::Pass
+        ));
+        assert!(matches!(
+            f.check(Path::new("/music/song.wav"), 1000, None),
+            FilterResult::Reject
+        ));
+        assert!(matches!(
+            f.check(Path::new("/music/noext"), 1000, None),
+            FilterResult::Reject
+        ));
     }
 
     #[test]
     fn empty_extensions_matches_all() {
         let f = FilterSet::new(vec![], None, None, false);
-        assert!(f.matches(Path::new("/music/anything.xyz"), 1000, None));
+        assert!(matches!(
+            f.check(Path::new("/music/anything.xyz"), 1000, None),
+            FilterResult::Pass
+        ));
     }
 
     #[test]
     fn min_size_filter() {
         let f = FilterSet::new(vec![], Some(ByteSize(1000)), None, false);
-        assert!(f.matches(Path::new("/song.mp3"), 1000, None));
-        assert!(f.matches(Path::new("/song.mp3"), 2000, None));
-        assert!(!f.matches(Path::new("/song.mp3"), 999, None));
+        assert!(matches!(
+            f.check(Path::new("/song.mp3"), 1000, None),
+            FilterResult::Pass
+        ));
+        assert!(matches!(
+            f.check(Path::new("/song.mp3"), 2000, None),
+            FilterResult::Pass
+        ));
+        assert!(matches!(
+            f.check(Path::new("/song.mp3"), 999, None),
+            FilterResult::Reject
+        ));
     }
 
     #[test]
     fn live_filter() {
         let f = FilterSet::new(vec![], None, None, true);
-        assert!(!f.matches(Path::new("/music/song live.mp3"), 1000, None));
-        assert!(!f.matches(Path::new("/music/Song (Live).mp3"), 1000, None));
-        assert!(!f.matches(Path::new("/music/live/song.mp3"), 1000, None));
-        assert!(!f.matches(Path::new("/music/Live At Wembley/song.mp3"), 1000, None));
-        assert!(f.matches(Path::new("/music/olive/song.mp3"), 1000, None));
-        assert!(f.matches(Path::new("/music/deliver.mp3"), 1000, None));
-        assert!(f.matches(Path::new("/music/alive.mp3"), 1000, None));
+        assert!(matches!(
+            f.check(Path::new("/music/song live.mp3"), 1000, None),
+            FilterResult::Reject
+        ));
+        assert!(matches!(
+            f.check(Path::new("/music/Song (Live).mp3"), 1000, None),
+            FilterResult::Reject
+        ));
+        assert!(matches!(
+            f.check(Path::new("/music/live/song.mp3"), 1000, None),
+            FilterResult::Reject
+        ));
+        assert!(matches!(
+            f.check(Path::new("/music/Live At Wembley/song.mp3"), 1000, None),
+            FilterResult::Reject
+        ));
+        assert!(matches!(
+            f.check(Path::new("/music/olive/song.mp3"), 1000, None),
+            FilterResult::Pass
+        ));
+        assert!(matches!(
+            f.check(Path::new("/music/deliver.mp3"), 1000, None),
+            FilterResult::Pass
+        ));
+        assert!(matches!(
+            f.check(Path::new("/music/alive.mp3"), 1000, None),
+            FilterResult::Pass
+        ));
     }
 
     #[test]
     fn live_filter_disabled() {
         let f = FilterSet::new(vec![], None, None, false);
-        assert!(f.matches(Path::new("/music/live/song.mp3"), 1000, None));
+        assert!(matches!(
+            f.check(Path::new("/music/live/song.mp3"), 1000, None),
+            FilterResult::Pass
+        ));
     }
 
     #[test]
-    fn min_duration_filter() {
+    fn min_duration_passes_when_sufficient() {
+        let fs = FilterSet::new(vec![], None, Some(Duration::from_secs(60)), false);
+        assert!(matches!(
+            fs.check(Path::new("song.mp3"), 1000, Some(Duration::from_secs(120))),
+            FilterResult::Pass
+        ));
+    }
+
+    #[test]
+    fn min_duration_rejects_when_too_short() {
+        let fs = FilterSet::new(vec![], None, Some(Duration::from_secs(60)), false);
+        assert!(matches!(
+            fs.check(Path::new("sample.mp3"), 1000, Some(Duration::from_secs(10))),
+            FilterResult::Reject
+        ));
+    }
+
+    #[test]
+    fn min_duration_needs_probe_when_unknown() {
+        let fs = FilterSet::new(vec![], None, Some(Duration::from_secs(60)), false);
+        assert!(matches!(
+            fs.check(Path::new("song.mp3"), 1000, None),
+            FilterResult::NeedsDuration
+        ));
+    }
+
+    #[test]
+    fn no_min_duration_passes_without_probe() {
         let fs = FilterSet::new(vec![], None, None, false);
-        assert!(fs.matches(Path::new("song.mp3"), 1000, Some(Duration::from_secs(120))));
-
-        let fs = FilterSet::new(vec![], None, Some(Duration::from_secs(60)), false);
-        assert!(fs.matches(Path::new("song.mp3"), 1000, Some(Duration::from_secs(120))));
-        assert!(!fs.matches(Path::new("sample.mp3"), 1000, Some(Duration::from_secs(10))));
-    }
-
-    #[test]
-    fn min_duration_none_passes() {
-        let fs = FilterSet::new(vec![], None, Some(Duration::from_secs(60)), false);
-        assert!(fs.matches(Path::new("unknown.bin"), 1000, None));
+        assert!(matches!(
+            fs.check(Path::new("song.mp3"), 1000, None),
+            FilterResult::Pass
+        ));
     }
 
     #[test]

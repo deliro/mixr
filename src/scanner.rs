@@ -7,7 +7,7 @@ use rand::rng;
 use rand::seq::SliceRandom;
 use walkdir::WalkDir;
 
-use crate::filters::FilterSet;
+use crate::filters::{FilterResult, FilterSet};
 use crate::probe;
 use crate::types::{ByteSize, FileEntry};
 
@@ -25,7 +25,6 @@ pub fn scan(
     source: &Path,
     filters: &FilterSet,
     budget: u64,
-    needs_probe: bool,
     tx: &Sender<ScanMsg>,
     shutdown: &Arc<AtomicBool>,
 ) {
@@ -62,16 +61,28 @@ pub fn scan(
         };
         let size = meta.len();
 
-        let audio_meta = if needs_probe && filters.matches_extension(&path) {
-            probe::probe(&path)
-        } else {
-            probe::AudioMeta {
-                duration: None,
-                bitrate_kbps: None,
+        let (matched, audio_meta) = match filters.check(&path, size, None) {
+            FilterResult::Pass => (
+                true,
+                probe::AudioMeta {
+                    duration: None,
+                    bitrate_kbps: None,
+                },
+            ),
+            FilterResult::Reject => (
+                false,
+                probe::AudioMeta {
+                    duration: None,
+                    bitrate_kbps: None,
+                },
+            ),
+            FilterResult::NeedsDuration => {
+                let probed = probe::probe(&path);
+                let result = filters.check(&path, size, probed.duration);
+                (matches!(result, FilterResult::Pass), probed)
             }
         };
 
-        let matched = filters.matches(&path, size, audio_meta.duration);
         let _ = tx.send(ScanMsg::FileFound {
             path: path.clone(),
             matched,
@@ -151,7 +162,7 @@ mod tests {
         );
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
-        scan(dir.path(), &filters, u64::MAX, false, &tx, &shutdown);
+        scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
 
         let mut messages: Vec<ScanMsg> = rx.try_iter().collect();
         let complete = messages.pop().unwrap();
@@ -176,7 +187,7 @@ mod tests {
         );
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
-        scan(dir.path(), &filters, u64::MAX, false, &tx, &shutdown);
+        scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
 
         let messages: Vec<ScanMsg> = rx.try_iter().collect();
         let complete = messages.last().unwrap();
@@ -201,7 +212,7 @@ mod tests {
         let filters = FilterSet::new(vec!["mp3".to_string()], Some(ByteSize(1000)), None, false);
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
-        scan(dir.path(), &filters, u64::MAX, false, &tx, &shutdown);
+        scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
 
         let messages: Vec<ScanMsg> = rx.try_iter().collect();
         let complete = messages.last().unwrap();
@@ -266,9 +277,14 @@ mod tests {
 
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
-        let filters = FilterSet::new(vec!["wav".to_string()], None, None, false);
+        let filters = FilterSet::new(
+            vec!["wav".to_string()],
+            None,
+            Some(std::time::Duration::from_secs(1)),
+            false,
+        );
 
-        scan(dir.path(), &filters, u64::MAX, true, &tx, &shutdown);
+        scan(dir.path(), &filters, u64::MAX, &tx, &shutdown);
 
         let mut found_duration = false;
         for msg in rx.iter() {
