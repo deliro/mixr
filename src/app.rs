@@ -1200,6 +1200,7 @@ fn update_setup(
                 validate_and_start(form, locale)
             } else if form.dropdown.visible {
                 apply_autocomplete(form);
+                form.dropdown.visible = false;
                 Effect::None
             } else {
                 form.focused = form.focused.next(form.encoding);
@@ -1230,8 +1231,8 @@ fn update_setup(
                 }
                 Encoding::Vbr => {
                     form.vbr_quality = match form.vbr_quality {
-                        VbrQuality::High | VbrQuality::Medium => VbrQuality::High,
-                        VbrQuality::Low => VbrQuality::Medium,
+                        VbrQuality::Low | VbrQuality::Medium => VbrQuality::Low,
+                        VbrQuality::High => VbrQuality::Medium,
                     };
                 }
                 Encoding::Keep => {}
@@ -1246,8 +1247,8 @@ fn update_setup(
                 }
                 Encoding::Vbr => {
                     form.vbr_quality = match form.vbr_quality {
-                        VbrQuality::High => VbrQuality::Medium,
-                        VbrQuality::Medium | VbrQuality::Low => VbrQuality::Low,
+                        VbrQuality::Low => VbrQuality::Medium,
+                        VbrQuality::Medium | VbrQuality::High => VbrQuality::High,
                     };
                 }
                 Encoding::Keep => {}
