@@ -62,7 +62,6 @@ pub struct Locale {
     pub quality_medium: &'static str,
     pub quality_low: &'static str,
     pub err_invalid_duration: &'static str,
-    #[allow(dead_code)]
     pub err_bitrate_required: &'static str,
     pub preparing: &'static str,
     pub converting: &'static str,

@@ -3,10 +3,8 @@ mod cli;
 mod copier;
 mod filters;
 mod i18n;
-#[allow(dead_code)]
 mod probe;
 mod scanner;
-#[allow(dead_code)]
 mod transcoder;
 mod tui;
 mod types;

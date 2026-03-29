@@ -11,10 +11,13 @@ use crate::filters::FilterSet;
 use crate::probe;
 use crate::types::{ByteSize, FileEntry};
 
-#[allow(dead_code)]
 pub enum ScanMsg {
-    FileFound { path: PathBuf, matched: bool },
+    FileFound {
+        path: PathBuf,
+        matched: bool,
+    },
     Complete(Vec<FileEntry>),
+    #[allow(dead_code)]
     Error(String),
 }
 
