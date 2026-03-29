@@ -195,6 +195,18 @@ mod tests {
             f.check(Path::new("/music/alive.mp3"), 1000, None),
             FilterResult::Pass
         ));
+        assert!(matches!(
+            f.check(Path::new("/music/Nolive/song.mp3"), 1000, None),
+            FilterResult::Pass
+        ));
+        assert!(matches!(
+            f.check(Path::new("/music/livewire.mp3"), 1000, None),
+            FilterResult::Pass
+        ));
+        assert!(matches!(
+            f.check(Path::new("/music/LiveNation/song.mp3"), 1000, None),
+            FilterResult::Pass
+        ));
     }
 
     #[test]
