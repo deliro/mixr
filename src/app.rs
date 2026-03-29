@@ -157,7 +157,7 @@ impl Default for SetupForm {
             extensions: String::new(),
             exclude: String::new(),
             encoding: Encoding::Keep,
-            cbr_bitrate_idx: 0_usize,
+            cbr_bitrate_idx: 5_usize,
             vbr_quality: VbrQuality::High,
             no_live: false,
             keep_names: false,
@@ -175,7 +175,7 @@ impl SetupForm {
         let cbr_bitrate_idx = config
             .cbr_bitrate
             .and_then(|br| BITRATE_OPTIONS.iter().position(|&o| o == br))
-            .unwrap_or(0_usize);
+            .unwrap_or(5_usize);
         Self {
             source: config.source.to_str().unwrap_or("").to_string(),
             destination: config.destination.to_str().unwrap_or("").to_string(),
