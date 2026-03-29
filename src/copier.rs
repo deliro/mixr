@@ -12,7 +12,6 @@ use crate::types::{ByteSize, Config, Encoding, FileEntry, VbrQuality};
 const BUF_SIZE: usize = 1024 * 1024;
 const PIPE_CAPACITY: usize = 4_usize;
 
-#[allow(dead_code)]
 pub enum CopyMsg {
     Preparing {
         index: usize,

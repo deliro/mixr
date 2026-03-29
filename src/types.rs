@@ -91,7 +91,6 @@ impl fmt::Display for ByteSize {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[allow(dead_code)]
 pub enum Encoding {
     #[default]
     Keep,
@@ -100,14 +99,12 @@ pub enum Encoding {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum VbrQuality {
     High,
     Medium,
     Low,
 }
 
-#[allow(dead_code)]
 impl VbrQuality {
     pub fn avg_bitrate_kbps(self) -> u16 {
         match self {
@@ -117,6 +114,7 @@ impl VbrQuality {
         }
     }
 
+    #[allow(dead_code)]
     pub fn lame_quality(self) -> u8 {
         match self {
             Self::High => 0_u8,
@@ -127,16 +125,15 @@ impl VbrQuality {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct FileEntry {
     pub path: PathBuf,
     pub size: ByteSize,
+    #[allow(dead_code)]
     pub duration: Option<Duration>,
     pub bitrate_kbps: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Config {
     pub source: PathBuf,
     pub destination: PathBuf,
@@ -240,7 +237,6 @@ pub fn format_duration(d: Duration) -> String {
 }
 
 #[derive(Debug, PartialEq)]
-#[allow(dead_code)]
 pub enum ParseDurationError {
     Empty,
     Invalid(String),
@@ -259,7 +255,6 @@ impl fmt::Display for ParseDurationError {
 
 impl std::error::Error for ParseDurationError {}
 
-#[allow(dead_code)]
 pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
     let s = s.trim();
     if s.is_empty() {
