@@ -6,7 +6,7 @@ use std::time::Instant;
 use crate::copier::CopyMsg;
 use crate::i18n::{self, Locale};
 use crate::scanner::ScanMsg;
-use crate::types::{ByteSize, Config, Encoding, FileEntry};
+use crate::types::{ByteSize, Config, Encoding, FileEntry, VbrQuality, parse_duration};
 
 pub const MAX_UPCOMING: usize = 3;
 pub const MAX_HISTORY: usize = 4;
@@ -17,8 +17,11 @@ pub enum SetupField {
     Destination,
     Size,
     MinSize,
+    MinDuration,
     Extensions,
     Exclude,
+    Encoding,
+    Bitrate,
     NoLive,
     KeepNames,
     Overwrite,
@@ -26,33 +29,49 @@ pub enum SetupField {
 }
 
 impl SetupField {
-    pub fn next(self) -> Self {
-        match self {
+    pub fn next(self, encoding: Encoding) -> Self {
+        let n = match self {
             Self::Source => Self::Destination,
             Self::Destination => Self::Size,
             Self::Size => Self::MinSize,
-            Self::MinSize => Self::Extensions,
+            Self::MinSize => Self::MinDuration,
+            Self::MinDuration => Self::Extensions,
             Self::Extensions => Self::Exclude,
-            Self::Exclude => Self::NoLive,
+            Self::Exclude => Self::Encoding,
+            Self::Encoding => Self::Bitrate,
+            Self::Bitrate => Self::NoLive,
             Self::NoLive => Self::KeepNames,
             Self::KeepNames => Self::Overwrite,
             Self::Overwrite => Self::Start,
             Self::Start => Self::Source,
+        };
+        if n == Self::Bitrate && encoding == Encoding::Keep {
+            Self::NoLive
+        } else {
+            n
         }
     }
 
-    pub fn prev(self) -> Self {
-        match self {
+    pub fn prev(self, encoding: Encoding) -> Self {
+        let n = match self {
             Self::Source => Self::Start,
             Self::Destination => Self::Source,
             Self::Size => Self::Destination,
             Self::MinSize => Self::Size,
-            Self::Extensions => Self::MinSize,
+            Self::MinDuration => Self::MinSize,
+            Self::Extensions => Self::MinDuration,
             Self::Exclude => Self::Extensions,
-            Self::NoLive => Self::Exclude,
+            Self::Encoding => Self::Exclude,
+            Self::Bitrate => Self::Encoding,
+            Self::NoLive => Self::Bitrate,
             Self::KeepNames => Self::NoLive,
             Self::Overwrite => Self::KeepNames,
             Self::Start => Self::Overwrite,
+        };
+        if n == Self::Bitrate && encoding == Encoding::Keep {
+            Self::Encoding
+        } else {
+            n
         }
     }
 
@@ -63,6 +82,7 @@ impl SetupField {
                 | Self::Destination
                 | Self::Size
                 | Self::MinSize
+                | Self::MinDuration
                 | Self::Extensions
                 | Self::Exclude
         )
@@ -86,6 +106,7 @@ impl SetupField {
             Self::Destination => locale.ph_destination,
             Self::Size => locale.ph_size,
             Self::MinSize => locale.ph_min_size,
+            Self::MinDuration => locale.ph_min_duration,
             Self::Extensions => locale.ph_extensions,
             Self::Exclude => locale.ph_exclude,
             _ => "",
@@ -94,6 +115,7 @@ impl SetupField {
 }
 
 pub const MAX_DROPDOWN: usize = 8;
+pub const BITRATE_OPTIONS: &[u16] = &[128, 160, 192, 224, 256, 320];
 
 #[derive(Debug, Clone, Default)]
 pub struct Dropdown {
@@ -109,8 +131,12 @@ pub struct SetupForm {
     pub destination: String,
     pub size: String,
     pub min_size: String,
+    pub min_duration: String,
     pub extensions: String,
     pub exclude: String,
+    pub encoding: Encoding,
+    pub cbr_bitrate_idx: usize,
+    pub vbr_quality: VbrQuality,
     pub no_live: bool,
     pub keep_names: bool,
     pub overwrite: bool,
@@ -127,8 +153,12 @@ impl Default for SetupForm {
             destination: String::new(),
             size: String::new(),
             min_size: String::new(),
+            min_duration: String::new(),
             extensions: String::new(),
             exclude: String::new(),
+            encoding: Encoding::Keep,
+            cbr_bitrate_idx: 0_usize,
+            vbr_quality: VbrQuality::High,
             no_live: false,
             keep_names: false,
             overwrite: false,
@@ -147,6 +177,7 @@ impl SetupForm {
             SetupField::Destination => Some(&self.destination),
             SetupField::Size => Some(&self.size),
             SetupField::MinSize => Some(&self.min_size),
+            SetupField::MinDuration => Some(&self.min_duration),
             SetupField::Extensions => Some(&self.extensions),
             SetupField::Exclude => Some(&self.exclude),
             _ => None,
@@ -159,6 +190,7 @@ impl SetupForm {
             SetupField::Destination => Some(&mut self.destination),
             SetupField::Size => Some(&mut self.size),
             SetupField::MinSize => Some(&mut self.min_size),
+            SetupField::MinDuration => Some(&mut self.min_duration),
             SetupField::Extensions => Some(&mut self.extensions),
             SetupField::Exclude => Some(&mut self.exclude),
             _ => None,
@@ -276,6 +308,8 @@ fn expand_tilde(s: &str) -> Option<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileStatus {
     Queued,
+    Reading,
+    Converting,
     Copying,
     Done,
     Failed,
@@ -682,7 +716,18 @@ fn handle_copy(model: &mut Model, copy_msg: CopyMsg) -> Effect {
             };
             Effect::None
         }
-        CopyMsg::Preparing { .. } => Effect::None,
+        CopyMsg::Preparing { index, converting } => {
+            if let Phase::Copying(cs) = &mut model.phase
+                && let Some(file) = cs.files.get_mut(index)
+            {
+                file.status = if converting {
+                    FileStatus::Converting
+                } else {
+                    FileStatus::Reading
+                };
+            }
+            Effect::None
+        }
         CopyMsg::Aborted => {
             model.should_quit = true;
             Effect::Quit
@@ -699,6 +744,7 @@ pub fn field_is_invalid(field: SetupField, value: &str) -> bool {
         return false;
     }
     match field {
+        SetupField::MinDuration => parse_duration(value).is_err(),
         SetupField::Size | SetupField::MinSize => ByteSize::parse(value).is_err(),
         SetupField::Source => {
             let resolved = resolve_path_value(value);
@@ -984,7 +1030,7 @@ fn update_setup(
                     form.dropdown.scroll_offset = form.dropdown.selected;
                 }
             } else {
-                form.focused = form.focused.prev();
+                form.focused = form.focused.prev(form.encoding);
                 form.error = None;
                 form.dropdown.visible = false;
                 form.sync_cursor();
@@ -1004,7 +1050,7 @@ fn update_setup(
                         .saturating_sub(MAX_DROPDOWN.saturating_sub(1));
                 }
             } else {
-                form.focused = form.focused.next();
+                form.focused = form.focused.next(form.encoding);
                 form.error = None;
                 form.dropdown.visible = false;
                 form.sync_cursor();
@@ -1067,10 +1113,57 @@ fn update_setup(
                 validate_and_start(form, locale)
             } else {
                 form.dropdown.visible = false;
-                form.focused = form.focused.next();
+                form.focused = form.focused.next(form.encoding);
                 form.sync_cursor();
                 Effect::None
             }
+        }
+        KeyCode::Left if form.focused == SetupField::Encoding => {
+            form.encoding = match form.encoding {
+                Encoding::Keep => Encoding::Vbr,
+                Encoding::Cbr => Encoding::Keep,
+                Encoding::Vbr => Encoding::Cbr,
+            };
+            Effect::None
+        }
+        KeyCode::Right | KeyCode::Char(' ') if form.focused == SetupField::Encoding => {
+            form.encoding = match form.encoding {
+                Encoding::Keep => Encoding::Cbr,
+                Encoding::Cbr => Encoding::Vbr,
+                Encoding::Vbr => Encoding::Keep,
+            };
+            Effect::None
+        }
+        KeyCode::Left if form.focused == SetupField::Bitrate => {
+            match form.encoding {
+                Encoding::Cbr => {
+                    form.cbr_bitrate_idx = form.cbr_bitrate_idx.saturating_sub(1);
+                }
+                Encoding::Vbr => {
+                    form.vbr_quality = match form.vbr_quality {
+                        VbrQuality::High | VbrQuality::Medium => VbrQuality::High,
+                        VbrQuality::Low => VbrQuality::Medium,
+                    };
+                }
+                Encoding::Keep => {}
+            }
+            Effect::None
+        }
+        KeyCode::Right if form.focused == SetupField::Bitrate => {
+            match form.encoding {
+                Encoding::Cbr => {
+                    let max = BITRATE_OPTIONS.len().saturating_sub(1);
+                    form.cbr_bitrate_idx = (form.cbr_bitrate_idx.saturating_add(1)).min(max);
+                }
+                Encoding::Vbr => {
+                    form.vbr_quality = match form.vbr_quality {
+                        VbrQuality::High => VbrQuality::Medium,
+                        VbrQuality::Medium | VbrQuality::Low => VbrQuality::Low,
+                    };
+                }
+                Encoding::Keep => {}
+            }
+            Effect::None
         }
         KeyCode::Char(' ') if form.focused.is_checkbox() => {
             match form.focused {
@@ -1155,6 +1248,16 @@ fn validate_and_start(form: &mut SetupForm, locale: &Locale) -> Effect {
         }
     };
 
+    let min_duration = if form.min_duration.is_empty() {
+        None
+    } else if let Ok(d) = parse_duration(&form.min_duration) {
+        Some(d)
+    } else {
+        form.error = Some(locale.err_invalid_duration.to_string());
+        form.focused = SetupField::MinDuration;
+        return Effect::None;
+    };
+
     let include = if form.extensions.is_empty() {
         None
     } else {
@@ -1172,19 +1275,25 @@ fn validate_and_start(form: &mut SetupForm, locale: &Locale) -> Effect {
         crate::types::DEFAULT_EXTENSIONS,
     );
 
+    let (cbr_bitrate, vbr_quality) = match form.encoding {
+        Encoding::Keep => (None, None),
+        Encoding::Cbr => (BITRATE_OPTIONS.get(form.cbr_bitrate_idx).copied(), None),
+        Encoding::Vbr => (None, Some(form.vbr_quality)),
+    };
+
     let config = Config {
         source,
         destination: PathBuf::from(resolve_path_value(&form.destination)),
         max_size,
         min_file_size,
-        min_duration: None,
+        min_duration,
         no_live: form.no_live,
         keep_names: form.keep_names,
         overwrite: form.overwrite,
         allowed_extensions,
-        encoding: Encoding::Keep,
-        cbr_bitrate: None,
-        vbr_quality: None,
+        encoding: form.encoding,
+        cbr_bitrate,
+        vbr_quality,
     };
 
     Effect::StartScan(config)
