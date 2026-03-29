@@ -11,15 +11,14 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Gauge, List, ListItem, Paragraph, Wrap};
 
 use crate::app::{
-    BITRATE_OPTIONS, CopyState, Effect, FileStatus, MAX_HISTORY, MAX_UPCOMING, Model, Msg, Phase,
-    ScanState, SetupField, SetupForm, dest_existing_prefix_len, field_is_invalid, format_ext_list,
-    update,
+    CopyState, Effect, FileStatus, MAX_HISTORY, MAX_UPCOMING, Model, Msg, Phase, ScanState,
+    SetupField, SetupForm, dest_existing_prefix_len, field_is_invalid, format_ext_list, update,
 };
 use crate::copier;
 use crate::filters::FilterSet;
 use crate::i18n::Locale;
 use crate::scanner;
-use crate::types::{ByteSize, Config, Encoding, Error, VbrQuality, format_duration};
+use crate::types::{ByteSize, CbrBitrate, Config, Encoding, Error, VbrQuality, format_duration};
 
 const TICK_RATE: Duration = Duration::from_millis(50);
 
@@ -356,13 +355,10 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
     }
 
     let bitrate_info = match form.encoding {
-        Encoding::Cbr => {
-            let br = BITRATE_OPTIONS
-                .get(form.cbr_bitrate_idx)
-                .copied()
-                .unwrap_or(192);
-            Some((locale.bitrate_label, format!("< {br} kbps >")))
-        }
+        Encoding::Cbr => Some((
+            locale.bitrate_label,
+            format!("< {} kbps >", form.cbr_bitrate.as_kbps()),
+        )),
         Encoding::Vbr => {
             let q = match form.vbr_quality {
                 VbrQuality::High => locale.quality_high,
@@ -553,7 +549,11 @@ fn encoding_label(cs: &CopyState, locale: &Locale) -> String {
     match cs.config.encoding {
         Encoding::Keep => locale.keep_original.to_string(),
         Encoding::Cbr => {
-            let br = cs.config.cbr_bitrate.unwrap_or(192_u16);
+            let br = cs
+                .config
+                .cbr_bitrate
+                .unwrap_or(CbrBitrate::Kbps192)
+                .as_kbps();
             format!("CBR {br} kbps")
         }
         Encoding::Vbr => {

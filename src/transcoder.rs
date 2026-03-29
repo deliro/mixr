@@ -9,22 +9,22 @@ use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
-use crate::types::{Encoding, VbrQuality};
+use crate::types::{CbrBitrate, Encoding, VbrQuality};
 
 pub struct TranscodeConfig {
     pub encoding: Encoding,
-    pub cbr_bitrate: Option<u16>,
+    pub cbr_bitrate: Option<CbrBitrate>,
     pub vbr_quality: Option<VbrQuality>,
 }
 
-fn bitrate_from_kbps(kbps: u16) -> mp3lame_encoder::Bitrate {
-    match kbps {
-        128_u16 => mp3lame_encoder::Bitrate::Kbps128,
-        160_u16 => mp3lame_encoder::Bitrate::Kbps160,
-        224_u16 => mp3lame_encoder::Bitrate::Kbps224,
-        256_u16 => mp3lame_encoder::Bitrate::Kbps256,
-        320_u16 => mp3lame_encoder::Bitrate::Kbps320,
-        _ => mp3lame_encoder::Bitrate::Kbps192,
+fn cbr_to_lame(br: CbrBitrate) -> mp3lame_encoder::Bitrate {
+    match br {
+        CbrBitrate::Kbps128 => mp3lame_encoder::Bitrate::Kbps128,
+        CbrBitrate::Kbps160 => mp3lame_encoder::Bitrate::Kbps160,
+        CbrBitrate::Kbps192 => mp3lame_encoder::Bitrate::Kbps192,
+        CbrBitrate::Kbps224 => mp3lame_encoder::Bitrate::Kbps224,
+        CbrBitrate::Kbps256 => mp3lame_encoder::Bitrate::Kbps256,
+        CbrBitrate::Kbps320 => mp3lame_encoder::Bitrate::Kbps320,
     }
 }
 
@@ -146,9 +146,9 @@ fn build_encoder(
 
     match config.encoding {
         Encoding::Cbr => {
-            let kbps = config.cbr_bitrate.unwrap_or(192_u16);
+            let br = config.cbr_bitrate.unwrap_or(CbrBitrate::Kbps192);
             builder
-                .set_brate(bitrate_from_kbps(kbps))
+                .set_brate(cbr_to_lame(br))
                 .map_err(|e| format!("{e:?}"))?;
         }
         Encoding::Vbr => {
@@ -179,7 +179,7 @@ mod tests {
 
         let config = TranscodeConfig {
             encoding: Encoding::Cbr,
-            cbr_bitrate: Some(128_u16),
+            cbr_bitrate: Some(CbrBitrate::Kbps128),
             vbr_quality: None,
         };
 

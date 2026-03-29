@@ -7,7 +7,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 use std::thread;
 
-use crate::types::{ByteSize, Config, Encoding, FileEntry, VbrQuality};
+use crate::types::{ByteSize, CbrBitrate, Config, Encoding, FileEntry, VbrQuality};
 
 const BUF_SIZE: usize = 1024 * 1024;
 const PIPE_CAPACITY: usize = 16_usize;
@@ -109,7 +109,9 @@ fn needs_transcode(entry: &FileEntry, config: &Config) -> bool {
                 return true;
             }
             let threshold = match config.encoding {
-                Encoding::Cbr => u32::from(config.cbr_bitrate.unwrap_or(0_u16)),
+                Encoding::Cbr => {
+                    u32::from(config.cbr_bitrate.unwrap_or(CbrBitrate::Kbps192).as_kbps())
+                }
                 Encoding::Vbr => u32::from(
                     config
                         .vbr_quality
@@ -666,7 +668,7 @@ mod tests {
             overwrite: false,
             allowed_extensions: vec![],
             encoding: Encoding::Cbr,
-            cbr_bitrate: Some(128_u16),
+            cbr_bitrate: Some(CbrBitrate::Kbps128),
             vbr_quality: None,
         };
 
@@ -717,7 +719,7 @@ mod tests {
             overwrite: false,
             allowed_extensions: vec![],
             encoding: Encoding::Cbr,
-            cbr_bitrate: Some(192),
+            cbr_bitrate: Some(CbrBitrate::Kbps192),
             vbr_quality: None,
         };
 

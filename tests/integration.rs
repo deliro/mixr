@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use mixr::copier::{CopyMsg, copy_files};
 use mixr::probe;
 use mixr::transcoder::{TranscodeConfig, transcode};
-use mixr::types::{ByteSize, Config, Encoding, FileEntry, VbrQuality};
+use mixr::types::{ByteSize, CbrBitrate, Config, Encoding, FileEntry, VbrQuality};
 
 fn fixture_mp3() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -89,7 +89,7 @@ fn transcode_real_mp3_to_cbr128() {
 
     let config = TranscodeConfig {
         encoding: Encoding::Cbr,
-        cbr_bitrate: Some(128),
+        cbr_bitrate: Some(CbrBitrate::Kbps128),
         vbr_quality: None,
     };
 
@@ -152,7 +152,7 @@ fn copy_real_mp3_with_cbr_reencoding() {
 
     let mut config = base_config(mp3.parent().unwrap(), dst.path());
     config.encoding = Encoding::Cbr;
-    config.cbr_bitrate = Some(128);
+    config.cbr_bitrate = Some(CbrBitrate::Kbps128);
 
     let (tx, rx) = mpsc::channel();
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -200,7 +200,7 @@ fn copy_real_mp3_below_threshold_copies_as_is() {
 
     let mut config = base_config(mp3.parent().unwrap(), dst.path());
     config.encoding = Encoding::Cbr;
-    config.cbr_bitrate = Some(320);
+    config.cbr_bitrate = Some(CbrBitrate::Kbps320);
 
     let (tx, rx) = mpsc::channel();
     let shutdown = Arc::new(AtomicBool::new(false));

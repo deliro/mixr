@@ -8,7 +8,9 @@ use mixr::cli;
 use mixr::filters::resolve_extensions;
 use mixr::i18n;
 use mixr::tui;
-use mixr::types::{ByteSize, Config, DEFAULT_EXTENSIONS, Encoding, VbrQuality, parse_duration};
+use mixr::types::{
+    ByteSize, CbrBitrate, Config, DEFAULT_EXTENSIONS, Encoding, VbrQuality, parse_duration,
+};
 
 #[derive(Parser)]
 #[command(
@@ -92,7 +94,12 @@ fn main() -> ExitCode {
 
             let cbr_bitrate = if encoding == Encoding::Cbr {
                 if let Some(br) = args.bitrate {
-                    Some(br)
+                    if let Some(cbr) = CbrBitrate::from_u16(br) {
+                        Some(cbr)
+                    } else {
+                        eprintln!("Invalid bitrate: {br}. Use: 128, 160, 192, 224, 256, 320");
+                        return ExitCode::FAILURE;
+                    }
                 } else {
                     eprintln!("{}", locale.err_bitrate_required);
                     return ExitCode::FAILURE;

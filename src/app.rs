@@ -6,7 +6,7 @@ use std::time::Instant;
 use crate::copier::CopyMsg;
 use crate::i18n::{self, Locale};
 use crate::scanner::ScanMsg;
-use crate::types::{ByteSize, Config, Encoding, FileEntry, VbrQuality, parse_duration};
+use crate::types::{ByteSize, CbrBitrate, Config, Encoding, FileEntry, VbrQuality, parse_duration};
 
 pub const MAX_UPCOMING: usize = 3;
 pub const MAX_HISTORY: usize = 4;
@@ -115,7 +115,6 @@ impl SetupField {
 }
 
 pub const MAX_DROPDOWN: usize = 8;
-pub const BITRATE_OPTIONS: &[u16] = &[128, 160, 192, 224, 256, 320];
 
 #[derive(Debug, Clone, Default)]
 pub struct Dropdown {
@@ -135,7 +134,7 @@ pub struct SetupForm {
     pub extensions: String,
     pub exclude: String,
     pub encoding: Encoding,
-    pub cbr_bitrate_idx: usize,
+    pub cbr_bitrate: CbrBitrate,
     pub vbr_quality: VbrQuality,
     pub no_live: bool,
     pub keep_names: bool,
@@ -157,7 +156,7 @@ impl Default for SetupForm {
             extensions: String::new(),
             exclude: String::new(),
             encoding: Encoding::Keep,
-            cbr_bitrate_idx: 5_usize,
+            cbr_bitrate: CbrBitrate::Kbps320,
             vbr_quality: VbrQuality::High,
             no_live: false,
             keep_names: false,
@@ -172,10 +171,6 @@ impl Default for SetupForm {
 
 impl SetupForm {
     fn from_config(config: &Config, _locale: &Locale) -> Self {
-        let cbr_bitrate_idx = config
-            .cbr_bitrate
-            .and_then(|br| BITRATE_OPTIONS.iter().position(|&o| o == br))
-            .unwrap_or(5_usize);
         Self {
             source: config.source.to_str().unwrap_or("").to_string(),
             destination: config.destination.to_str().unwrap_or("").to_string(),
@@ -198,7 +193,7 @@ impl SetupForm {
             extensions: config.allowed_extensions.join(", "),
             exclude: String::new(),
             encoding: config.encoding,
-            cbr_bitrate_idx,
+            cbr_bitrate: config.cbr_bitrate.unwrap_or(CbrBitrate::Kbps320),
             vbr_quality: config.vbr_quality.unwrap_or(VbrQuality::High),
             no_live: config.no_live,
             keep_names: config.keep_names,
@@ -1226,31 +1221,16 @@ fn update_setup(
         }
         KeyCode::Left if form.focused == SetupField::Bitrate => {
             match form.encoding {
-                Encoding::Cbr => {
-                    form.cbr_bitrate_idx = form.cbr_bitrate_idx.saturating_sub(1);
-                }
-                Encoding::Vbr => {
-                    form.vbr_quality = match form.vbr_quality {
-                        VbrQuality::Low | VbrQuality::Medium => VbrQuality::Low,
-                        VbrQuality::High => VbrQuality::Medium,
-                    };
-                }
+                Encoding::Cbr => form.cbr_bitrate = form.cbr_bitrate.prev(),
+                Encoding::Vbr => form.vbr_quality = form.vbr_quality.prev(),
                 Encoding::Keep => {}
             }
             Effect::None
         }
         KeyCode::Right if form.focused == SetupField::Bitrate => {
             match form.encoding {
-                Encoding::Cbr => {
-                    let max = BITRATE_OPTIONS.len().saturating_sub(1);
-                    form.cbr_bitrate_idx = (form.cbr_bitrate_idx.saturating_add(1)).min(max);
-                }
-                Encoding::Vbr => {
-                    form.vbr_quality = match form.vbr_quality {
-                        VbrQuality::Low => VbrQuality::Medium,
-                        VbrQuality::Medium | VbrQuality::High => VbrQuality::High,
-                    };
-                }
+                Encoding::Cbr => form.cbr_bitrate = form.cbr_bitrate.next(),
+                Encoding::Vbr => form.vbr_quality = form.vbr_quality.next(),
                 Encoding::Keep => {}
             }
             Effect::None
@@ -1367,7 +1347,7 @@ fn validate_and_start(form: &mut SetupForm, locale: &Locale) -> Effect {
 
     let (cbr_bitrate, vbr_quality) = match form.encoding {
         Encoding::Keep => (None, None),
-        Encoding::Cbr => (BITRATE_OPTIONS.get(form.cbr_bitrate_idx).copied(), None),
+        Encoding::Cbr => (Some(form.cbr_bitrate), None),
         Encoding::Vbr => (None, Some(form.vbr_quality)),
     };
 

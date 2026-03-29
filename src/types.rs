@@ -99,10 +99,65 @@ pub enum Encoding {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CbrBitrate {
+    Kbps128,
+    Kbps160,
+    Kbps192,
+    Kbps224,
+    Kbps256,
+    Kbps320,
+}
+
+impl CbrBitrate {
+    pub fn as_kbps(self) -> u16 {
+        match self {
+            Self::Kbps128 => 128_u16,
+            Self::Kbps160 => 160_u16,
+            Self::Kbps192 => 192_u16,
+            Self::Kbps224 => 224_u16,
+            Self::Kbps256 => 256_u16,
+            Self::Kbps320 => 320_u16,
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Kbps128 => Self::Kbps160,
+            Self::Kbps160 => Self::Kbps192,
+            Self::Kbps192 => Self::Kbps224,
+            Self::Kbps224 => Self::Kbps256,
+            Self::Kbps256 | Self::Kbps320 => Self::Kbps320,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Kbps128 | Self::Kbps160 => Self::Kbps128,
+            Self::Kbps192 => Self::Kbps160,
+            Self::Kbps224 => Self::Kbps192,
+            Self::Kbps256 => Self::Kbps224,
+            Self::Kbps320 => Self::Kbps256,
+        }
+    }
+
+    pub fn from_u16(v: u16) -> Option<Self> {
+        match v {
+            128_u16 => Some(Self::Kbps128),
+            160_u16 => Some(Self::Kbps160),
+            192_u16 => Some(Self::Kbps192),
+            224_u16 => Some(Self::Kbps224),
+            256_u16 => Some(Self::Kbps256),
+            320_u16 => Some(Self::Kbps320),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VbrQuality {
-    High,
-    Medium,
     Low,
+    Medium,
+    High,
 }
 
 impl VbrQuality {
@@ -114,12 +169,17 @@ impl VbrQuality {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn lame_quality(self) -> u8 {
+    pub fn next(self) -> Self {
         match self {
-            Self::High => 0_u8,
-            Self::Medium => 2_u8,
-            Self::Low => 6_u8,
+            Self::Low => Self::Medium,
+            Self::Medium | Self::High => Self::High,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Low | Self::Medium => Self::Low,
+            Self::High => Self::Medium,
         }
     }
 }
@@ -145,7 +205,7 @@ pub struct Config {
     pub allowed_extensions: Vec<String>,
     pub min_duration: Option<Duration>,
     pub encoding: Encoding,
-    pub cbr_bitrate: Option<u16>,
+    pub cbr_bitrate: Option<CbrBitrate>,
     pub vbr_quality: Option<VbrQuality>,
 }
 
@@ -388,10 +448,33 @@ mod tests {
     }
 
     #[test]
-    fn vbr_quality_lame_values() {
-        assert_eq!(VbrQuality::High.lame_quality(), 0);
-        assert_eq!(VbrQuality::Medium.lame_quality(), 2);
-        assert_eq!(VbrQuality::Low.lame_quality(), 6);
+    fn cbr_bitrate_values() {
+        assert_eq!(CbrBitrate::Kbps128.as_kbps(), 128);
+        assert_eq!(CbrBitrate::Kbps192.as_kbps(), 192);
+        assert_eq!(CbrBitrate::Kbps320.as_kbps(), 320);
+    }
+
+    #[test]
+    fn cbr_bitrate_navigation() {
+        assert_eq!(CbrBitrate::Kbps128.next(), CbrBitrate::Kbps160);
+        assert_eq!(CbrBitrate::Kbps320.next(), CbrBitrate::Kbps320);
+        assert_eq!(CbrBitrate::Kbps320.prev(), CbrBitrate::Kbps256);
+        assert_eq!(CbrBitrate::Kbps128.prev(), CbrBitrate::Kbps128);
+    }
+
+    #[test]
+    fn cbr_bitrate_from_u16() {
+        assert_eq!(CbrBitrate::from_u16(128), Some(CbrBitrate::Kbps128));
+        assert_eq!(CbrBitrate::from_u16(320), Some(CbrBitrate::Kbps320));
+        assert_eq!(CbrBitrate::from_u16(999), None);
+    }
+
+    #[test]
+    fn vbr_quality_navigation() {
+        assert_eq!(VbrQuality::Low.next(), VbrQuality::Medium);
+        assert_eq!(VbrQuality::High.next(), VbrQuality::High);
+        assert_eq!(VbrQuality::High.prev(), VbrQuality::Medium);
+        assert_eq!(VbrQuality::Low.prev(), VbrQuality::Low);
     }
 
     #[test]
