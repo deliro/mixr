@@ -714,15 +714,20 @@ fn handle_copy(model: &mut Model, copy_msg: CopyMsg) -> Effect {
             Effect::None
         }
         CopyMsg::Complete => {
-            let (total_files, copied_bytes, errors, elapsed) = match &model.phase {
+            let (total_files, copied_bytes, errors, elapsed, destination) = match &model.phase {
                 Phase::Copying(cs) => (
                     cs.total_files,
                     cs.copied_bytes,
                     cs.errors.clone(),
                     cs.started_at.elapsed(),
+                    cs.config.destination.clone(),
                 ),
                 _ => return Effect::None,
             };
+            if !errors.is_empty() {
+                let log_path = destination.join("mixr-errors.log");
+                let _ = std::fs::write(&log_path, errors.join("\n"));
+            }
             model.phase = Phase::Done {
                 total_files,
                 total_bytes: copied_bytes,

@@ -574,15 +574,22 @@ fn view_copying(cs: &CopyState, locale: &Locale, frame: &mut Frame, area: Rect) 
 
     #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
     let total_file_rows = (MAX_UPCOMING.saturating_add(1).saturating_add(MAX_HISTORY)) as u16;
+    #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+    let error_rows: u16 = if cs.errors.is_empty() {
+        0_u16
+    } else {
+        cs.errors.len().min(3_usize).saturating_add(1) as u16
+    };
     let chunks = Layout::vertical([
         Constraint::Length(total_file_rows),
         Constraint::Min(0),
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
+        Constraint::Length(error_rows),
         Constraint::Length(1),
     ])
-    .areas::<6>(inner);
+    .areas::<7>(inner);
 
     render_file_list(cs, locale, frame, chunks[0_usize]);
 
@@ -675,11 +682,29 @@ fn view_copying(cs: &CopyState, locale: &Locale, frame: &mut Frame, area: Rect) 
         frame.render_widget(Paragraph::new(status), *chunk);
     }
 
+    if !cs.errors.is_empty() {
+        let max_shown = 3_usize;
+        let start = cs.errors.len().saturating_sub(max_shown);
+        let mut error_lines = vec![Line::from(Span::styled(
+            format!("{} ({}):", locale.errors, cs.errors.len()),
+            Style::default().fg(Color::Red).add_modifier(Modifier::DIM),
+        ))];
+        error_lines.extend(cs.errors.iter().skip(start).map(|err| {
+            Line::from(Span::styled(
+                format!("  {err}"),
+                Style::default().fg(Color::Red).add_modifier(Modifier::DIM),
+            ))
+        }));
+        if let Some(chunk) = chunks.get(5) {
+            frame.render_widget(Paragraph::new(error_lines), *chunk);
+        }
+    }
+
     let help = Line::from(Span::styled(
         locale.ctrl_c_stop,
         Style::default().fg(Color::DarkGray),
     ));
-    if let Some(chunk) = chunks.get(5) {
+    if let Some(chunk) = chunks.get(6) {
         frame.render_widget(Paragraph::new(help), *chunk);
     }
 }

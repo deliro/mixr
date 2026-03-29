@@ -144,6 +144,10 @@ pub fn run(config: &Config, locale: &'static Locale) -> Result<bool, Error> {
                 errors,
                 elapsed,
             } => {
+                if !errors.is_empty() {
+                    let log_path = config.destination.join("mixr-errors.log");
+                    let _ = std::fs::write(&log_path, errors.join("\n"));
+                }
                 let _ = writeln!(stderr);
                 #[allow(
                     clippy::cast_precision_loss,

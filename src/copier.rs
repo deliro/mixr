@@ -10,7 +10,8 @@ use std::thread;
 use crate::types::{ByteSize, Config, Encoding, FileEntry, VbrQuality};
 
 const BUF_SIZE: usize = 1024 * 1024;
-const PIPE_CAPACITY: usize = 4_usize;
+const PIPE_CAPACITY: usize = 16_usize;
+const TRANSCODE_BUF_THRESHOLD: usize = 256 * 1024;
 
 pub enum CopyMsg {
     Preparing {
@@ -158,46 +159,7 @@ fn reader_thread(
         };
 
         if needs_transcode(entry, config) {
-            let _ = pipe_tx.send(PipeMsg::Preparing {
-                index,
-                converting: true,
-            });
-
-            let dest_path = dest_path.with_extension("mp3");
-            let name = dest_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
-                .to_string();
-
-            let _ = pipe_tx.send(PipeMsg::StartFile {
-                index,
-                dest_path,
-                name,
-                original_path: entry.path.clone(),
-                size: entry.size,
-            });
-
-            let tc_config = crate::transcoder::TranscodeConfig {
-                encoding: config.encoding,
-                cbr_bitrate: config.cbr_bitrate,
-                vbr_quality: config.vbr_quality,
-            };
-
-            match crate::transcoder::transcode(&entry.path, &tc_config, &mut |chunk| {
-                let _ = pipe_tx.send(PipeMsg::Chunk(chunk.to_vec()));
-            }) {
-                Ok(()) => {
-                    let _ = pipe_tx.send(PipeMsg::EndFile { index });
-                }
-                Err(e) => {
-                    let _ = pipe_tx.send(PipeMsg::SkipFile {
-                        index,
-                        path: entry.path.clone(),
-                        error: e,
-                    });
-                }
-            }
+            transcode_file(index, entry, &dest_path, config, pipe_tx);
         } else {
             let _ = pipe_tx.send(PipeMsg::Preparing {
                 index,
@@ -239,6 +201,67 @@ fn reader_thread(
     }
 
     let _ = pipe_tx.send(PipeMsg::Done);
+}
+
+fn transcode_file(
+    index: usize,
+    entry: &FileEntry,
+    dest_path: &Path,
+    config: &Config,
+    pipe_tx: &mpsc::SyncSender<PipeMsg>,
+) {
+    let _ = pipe_tx.send(PipeMsg::Preparing {
+        index,
+        converting: true,
+    });
+
+    let dest_path = dest_path.with_extension("mp3");
+    let name = dest_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let _ = pipe_tx.send(PipeMsg::StartFile {
+        index,
+        dest_path,
+        name,
+        original_path: entry.path.clone(),
+        size: entry.size,
+    });
+
+    let tc_config = crate::transcoder::TranscodeConfig {
+        encoding: config.encoding,
+        cbr_bitrate: config.cbr_bitrate,
+        vbr_quality: config.vbr_quality,
+    };
+
+    let mut transcode_buf: Vec<u8> = Vec::with_capacity(TRANSCODE_BUF_THRESHOLD);
+    let result = crate::transcoder::transcode(&entry.path, &tc_config, &mut |chunk| {
+        transcode_buf.extend_from_slice(chunk);
+        if transcode_buf.len() >= TRANSCODE_BUF_THRESHOLD {
+            let full_buf = std::mem::replace(
+                &mut transcode_buf,
+                Vec::with_capacity(TRANSCODE_BUF_THRESHOLD),
+            );
+            let _ = pipe_tx.send(PipeMsg::Chunk(full_buf));
+        }
+    });
+    match result {
+        Ok(()) => {
+            if !transcode_buf.is_empty() {
+                let _ = pipe_tx.send(PipeMsg::Chunk(transcode_buf));
+            }
+            let _ = pipe_tx.send(PipeMsg::EndFile { index });
+        }
+        Err(e) => {
+            let _ = pipe_tx.send(PipeMsg::SkipFile {
+                index,
+                path: entry.path.clone(),
+                error: e,
+            });
+        }
+    }
 }
 
 fn read_file_chunks(
