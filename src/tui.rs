@@ -547,9 +547,28 @@ fn view_scanning(
     }
 }
 
+fn encoding_label(cs: &CopyState, locale: &Locale) -> String {
+    match cs.config.encoding {
+        Encoding::Keep => locale.keep_original.to_string(),
+        Encoding::Cbr => {
+            let br = cs.config.cbr_bitrate.unwrap_or(192_u16);
+            format!("CBR {br} kbps")
+        }
+        Encoding::Vbr => {
+            let q = match cs.config.vbr_quality.unwrap_or(VbrQuality::Medium) {
+                VbrQuality::High => locale.quality_high,
+                VbrQuality::Medium => locale.quality_medium,
+                VbrQuality::Low => locale.quality_low,
+            };
+            format!("VBR {q}")
+        }
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn view_copying(cs: &CopyState, locale: &Locale, frame: &mut Frame, area: Rect) {
-    let block = Block::bordered().title(format!(" mixr - {} ", locale.copying));
+    let enc = encoding_label(cs, locale);
+    let block = Block::bordered().title(format!(" mixr - {} \u{2014} {enc} ", locale.copying));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -679,21 +698,27 @@ fn render_file_list(cs: &CopyState, locale: &Locale, frame: &mut Frame, area: Re
     lines.extend(
         std::iter::repeat_with(|| Line::from("")).take(MAX_UPCOMING.saturating_sub(upcoming.len())),
     );
+    let spinner = cs.spinner_char();
     lines.extend(upcoming.iter().rev().map(|item| {
+        let display_name = item
+            .original_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&item.name);
         let (suffix, style) = match item.status {
             FileStatus::Reading => (
-                format!("   {}", locale.preparing),
+                format!("   {spinner} {}", locale.preparing),
                 Style::default().fg(Color::Yellow),
             ),
             FileStatus::Converting => (
-                format!("   {}", locale.converting),
+                format!("   {spinner} {}", locale.converting),
                 Style::default().fg(Color::Yellow),
             ),
             _ => (String::new(), Style::default().fg(Color::DarkGray)),
         };
         Line::from(vec![
             Span::styled(
-                format!("  {}", item.name),
+                format!("  {display_name}"),
                 Style::default().fg(Color::DarkGray),
             ),
             Span::styled(suffix, style),
@@ -701,8 +726,13 @@ fn render_file_list(cs: &CopyState, locale: &Locale, frame: &mut Frame, area: Re
     }));
 
     if let Some(cur) = cs.current() {
+        let cur_display = cur
+            .original_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&cur.name);
         lines.push(Line::from(Span::styled(
-            format!("> {} ({})", cur.name, cur.size),
+            format!("> {cur_display} ({})", cur.size),
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
@@ -717,12 +747,17 @@ fn render_file_list(cs: &CopyState, locale: &Locale, frame: &mut Frame, area: Re
             .iter()
             .zip(HISTORY_GREENS.iter())
             .map(|(item, &color)| {
+                let hist_display = item
+                    .original_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&item.name);
                 let style = match item.status {
                     FileStatus::Done => Style::default().fg(color),
                     FileStatus::Failed => Style::default().fg(Color::Red),
                     _ => Style::default(),
                 };
-                Line::from(Span::styled(format!("  {}", item.name), style))
+                Line::from(Span::styled(format!("  {hist_display}"), style))
             }),
     );
     lines.extend(

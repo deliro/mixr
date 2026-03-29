@@ -282,7 +282,7 @@ impl SetupForm {
 }
 
 fn is_word_separator(c: char) -> bool {
-    c == '/' || c == ' ' || c == '.' || c == '-' || c == '_'
+    c == '/' || c == '\\' || c == ' ' || c == '.' || c == '-' || c == '_'
 }
 
 fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
@@ -346,12 +346,13 @@ pub struct CopyState {
     pub started_at: Instant,
     pub speed_bytes: Vec<(Instant, u64)>,
     pub errors: Vec<String>,
+    pub spinner_tick: usize,
 }
 
 impl CopyState {
     #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
     pub fn speed(&self) -> f64 {
-        let window = std::time::Duration::from_secs(3);
+        let window = std::time::Duration::from_secs(10);
         let now = Instant::now();
         let cutoff = now.checked_sub(window).unwrap_or(now);
         let total: u64 = self
@@ -364,6 +365,16 @@ impl CopyState {
             return 0.0_f64;
         }
         total as f64 / window.as_secs_f64()
+    }
+
+    pub fn spinner_char(&self) -> char {
+        let len = SPINNER_CHARS.len();
+        let idx = if len == 0_usize {
+            0_usize
+        } else {
+            self.spinner_tick.checked_rem(len).unwrap_or(0_usize)
+        };
+        SPINNER_CHARS.get(idx).copied().unwrap_or(' ')
     }
 
     pub fn upcoming(&self) -> impl Iterator<Item = &FileItem> {
@@ -560,9 +571,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Effect {
                 state.spinner_tick = state.spinner_tick.wrapping_add(1);
             }
             if let Phase::Copying(cs) = &mut model.phase {
-                let five_secs = std::time::Duration::from_secs(5);
+                cs.spinner_tick = cs.spinner_tick.wrapping_add(1);
+                let twelve_secs = std::time::Duration::from_secs(12);
                 let cutoff = Instant::now()
-                    .checked_sub(five_secs)
+                    .checked_sub(twelve_secs)
                     .unwrap_or(Instant::now());
                 cs.speed_bytes.retain(|(t, _)| *t >= cutoff);
             }
@@ -633,6 +645,7 @@ fn handle_scan(model: &mut Model, scan_msg: ScanMsg) -> Effect {
                 started_at: Instant::now(),
                 speed_bytes: Vec::new(),
                 errors: Vec::new(),
+                spinner_tick: 0_usize,
             };
 
             model.phase = Phase::Copying(copy_state);
@@ -820,7 +833,7 @@ fn navigate_to_volumes(form: &mut SetupForm) {
         #[allow(clippy::as_conversions)]
         let drives: Vec<String> = (b'A'..=b'Z')
             .filter(|&letter| std::path::Path::new(&format!("{}:\\", letter as char)).exists())
-            .map(|letter| format!("{}:/", letter as char))
+            .map(|letter| format!("{}:{}", letter as char, std::path::MAIN_SEPARATOR))
             .collect();
         if !drives.is_empty() {
             match form.focused {
@@ -944,7 +957,7 @@ fn refresh_dropdown(form: &mut SetupForm) {
             if !name.to_lowercase().starts_with(&prefix_lower) {
                 return None;
             }
-            Some(format!("{name}/"))
+            Some(format!("{name}{}", std::path::MAIN_SEPARATOR))
         })
         .collect();
 
@@ -1672,6 +1685,7 @@ mod tests {
             started_at: std::time::Instant::now(),
             speed_bytes: vec![],
             errors: vec![],
+            spinner_tick: 0_usize,
         });
 
         let effect = update(
