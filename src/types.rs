@@ -362,125 +362,132 @@ pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
-    #[test]
-    fn parse_gigabytes() {
-        assert_eq!(ByteSize::parse("8G").unwrap(), ByteSize(8 * GB));
-        #[allow(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            clippy::cast_precision_loss,
-            clippy::as_conversions
-        )]
-        let expected = (1.5_f64 * GB as f64) as u64;
-        assert_eq!(ByteSize::parse("1.5GB").unwrap(), ByteSize(expected));
-        assert_eq!(ByteSize::parse("8gb").unwrap(), ByteSize(8 * GB));
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        clippy::as_conversions
+    )]
+    const BYTES_1_5_GB: u64 = (1.5_f64 * GB as f64) as u64;
+
+    #[rstest]
+    #[case("8G", ByteSize(8 * GB))]
+    #[case("1.5GB", ByteSize(BYTES_1_5_GB))]
+    #[case("8gb", ByteSize(8 * GB))]
+    #[case("500M", ByteSize(500 * MB))]
+    #[case("100mb", ByteSize(100 * MB))]
+    #[case("900K", ByteSize(900 * KB))]
+    #[case("1024B", ByteSize(1024))]
+    #[case("1024", ByteSize(1024))]
+    fn parse_size_valid(#[case] input: &str, #[case] expected: ByteSize) {
+        assert_eq!(ByteSize::parse(input).unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case("", ParseSizeError::Empty)]
+    #[case("0G", ParseSizeError::NegativeOrZero)]
+    fn parse_size_error(#[case] input: &str, #[case] expected: ParseSizeError) {
+        assert_eq!(ByteSize::parse(input), Err(expected));
     }
 
     #[test]
-    fn parse_megabytes() {
-        assert_eq!(ByteSize::parse("500M").unwrap(), ByteSize(500 * MB));
-        assert_eq!(ByteSize::parse("100mb").unwrap(), ByteSize(100 * MB));
-    }
-
-    #[test]
-    fn parse_kilobytes() {
-        assert_eq!(ByteSize::parse("900K").unwrap(), ByteSize(900 * KB));
-    }
-
-    #[test]
-    fn parse_bytes() {
-        assert_eq!(ByteSize::parse("1024B").unwrap(), ByteSize(1024));
-        assert_eq!(ByteSize::parse("1024").unwrap(), ByteSize(1024));
-    }
-
-    #[test]
-    fn parse_errors() {
-        assert_eq!(ByteSize::parse(""), Err(ParseSizeError::Empty));
-        assert_eq!(ByteSize::parse("0G"), Err(ParseSizeError::NegativeOrZero));
+    fn parse_size_unknown_unit() {
         assert_eq!(
             ByteSize::parse("5X"),
             Err(ParseSizeError::UnknownUnit("x".to_string()))
         );
     }
 
-    #[test]
-    fn format_sizes() {
-        assert_eq!(format!("{}", ByteSize(8 * GB)), "8.0G");
-        assert_eq!(format!("{}", ByteSize(500 * MB)), "500.0M");
-        assert_eq!(format!("{}", ByteSize(900 * KB)), "900.0K");
-        assert_eq!(format!("{}", ByteSize(512)), "512B");
+    #[rstest]
+    #[case(8 * GB, "8.0G")]
+    #[case(500 * MB, "500.0M")]
+    #[case(900 * KB, "900.0K")]
+    #[case(512, "512B")]
+    fn format_sizes(#[case] bytes: u64, #[case] expected: &str) {
+        assert_eq!(format!("{}", ByteSize(bytes)), expected);
     }
 
-    #[test]
-    fn parse_duration_bare_seconds() {
-        assert_eq!(parse_duration("30").unwrap().as_secs(), 30);
-        assert_eq!(parse_duration("120").unwrap().as_secs(), 120);
+    #[rstest]
+    #[case("30", 30)]
+    #[case("120", 120)]
+    #[case("30s", 30)]
+    #[case("2m", 120)]
+    #[case("2m30s", 150)]
+    #[case("2:30", 150)]
+    #[case("0:45", 45)]
+    #[case("10:00", 600)]
+    fn parse_duration_valid(#[case] input: &str, #[case] expected_secs: u64) {
+        assert_eq!(parse_duration(input).unwrap().as_secs(), expected_secs);
     }
 
-    #[test]
-    fn parse_duration_with_suffix() {
-        assert_eq!(parse_duration("30s").unwrap().as_secs(), 30);
-        assert_eq!(parse_duration("2m").unwrap().as_secs(), 120);
-        assert_eq!(parse_duration("2m30s").unwrap().as_secs(), 150);
+    #[rstest]
+    #[case("")]
+    #[case("abc")]
+    #[case("0")]
+    #[case("-5")]
+    fn parse_duration_errors(#[case] input: &str) {
+        assert!(parse_duration(input).is_err());
     }
 
-    #[test]
-    fn parse_duration_colon_format() {
-        assert_eq!(parse_duration("2:30").unwrap().as_secs(), 150);
-        assert_eq!(parse_duration("0:45").unwrap().as_secs(), 45);
-        assert_eq!(parse_duration("10:00").unwrap().as_secs(), 600);
+    #[rstest]
+    #[case(VbrQuality::High, 245)]
+    #[case(VbrQuality::Medium, 190)]
+    #[case(VbrQuality::Low, 130)]
+    fn vbr_quality_avg_bitrate(#[case] quality: VbrQuality, #[case] expected: u16) {
+        assert_eq!(quality.avg_bitrate_kbps(), expected);
     }
 
-    #[test]
-    fn parse_duration_errors() {
-        assert!(parse_duration("").is_err());
-        assert!(parse_duration("abc").is_err());
-        assert!(parse_duration("0").is_err());
-        assert!(parse_duration("-5").is_err());
+    #[rstest]
+    #[case(CbrBitrate::Kbps128, 128)]
+    #[case(CbrBitrate::Kbps192, 192)]
+    #[case(CbrBitrate::Kbps320, 320)]
+    fn cbr_bitrate_values(#[case] bitrate: CbrBitrate, #[case] expected: u16) {
+        assert_eq!(bitrate.as_kbps(), expected);
     }
 
-    #[test]
-    fn vbr_quality_avg_bitrate() {
-        assert_eq!(VbrQuality::High.avg_bitrate_kbps(), 245);
-        assert_eq!(VbrQuality::Medium.avg_bitrate_kbps(), 190);
-        assert_eq!(VbrQuality::Low.avg_bitrate_kbps(), 130);
+    #[rstest]
+    #[case(CbrBitrate::Kbps128, CbrBitrate::Kbps160)]
+    #[case(CbrBitrate::Kbps320, CbrBitrate::Kbps320)]
+    fn cbr_bitrate_next(#[case] input: CbrBitrate, #[case] expected: CbrBitrate) {
+        assert_eq!(input.next(), expected);
     }
 
-    #[test]
-    fn cbr_bitrate_values() {
-        assert_eq!(CbrBitrate::Kbps128.as_kbps(), 128);
-        assert_eq!(CbrBitrate::Kbps192.as_kbps(), 192);
-        assert_eq!(CbrBitrate::Kbps320.as_kbps(), 320);
+    #[rstest]
+    #[case(CbrBitrate::Kbps320, CbrBitrate::Kbps256)]
+    #[case(CbrBitrate::Kbps128, CbrBitrate::Kbps128)]
+    fn cbr_bitrate_prev(#[case] input: CbrBitrate, #[case] expected: CbrBitrate) {
+        assert_eq!(input.prev(), expected);
     }
 
-    #[test]
-    fn cbr_bitrate_navigation() {
-        assert_eq!(CbrBitrate::Kbps128.next(), CbrBitrate::Kbps160);
-        assert_eq!(CbrBitrate::Kbps320.next(), CbrBitrate::Kbps320);
-        assert_eq!(CbrBitrate::Kbps320.prev(), CbrBitrate::Kbps256);
-        assert_eq!(CbrBitrate::Kbps128.prev(), CbrBitrate::Kbps128);
+    #[rstest]
+    #[case(128, Some(CbrBitrate::Kbps128))]
+    #[case(320, Some(CbrBitrate::Kbps320))]
+    #[case(999, None)]
+    fn cbr_bitrate_from_u16(#[case] input: u16, #[case] expected: Option<CbrBitrate>) {
+        assert_eq!(CbrBitrate::from_u16(input), expected);
     }
 
-    #[test]
-    fn cbr_bitrate_from_u16() {
-        assert_eq!(CbrBitrate::from_u16(128), Some(CbrBitrate::Kbps128));
-        assert_eq!(CbrBitrate::from_u16(320), Some(CbrBitrate::Kbps320));
-        assert_eq!(CbrBitrate::from_u16(999), None);
+    #[rstest]
+    #[case(VbrQuality::Low, VbrQuality::Medium)]
+    #[case(VbrQuality::High, VbrQuality::High)]
+    fn vbr_quality_next(#[case] input: VbrQuality, #[case] expected: VbrQuality) {
+        assert_eq!(input.next(), expected);
     }
 
-    #[test]
-    fn vbr_quality_navigation() {
-        assert_eq!(VbrQuality::Low.next(), VbrQuality::Medium);
-        assert_eq!(VbrQuality::High.next(), VbrQuality::High);
-        assert_eq!(VbrQuality::High.prev(), VbrQuality::Medium);
-        assert_eq!(VbrQuality::Low.prev(), VbrQuality::Low);
+    #[rstest]
+    #[case(VbrQuality::High, VbrQuality::Medium)]
+    #[case(VbrQuality::Low, VbrQuality::Low)]
+    fn vbr_quality_prev(#[case] input: VbrQuality, #[case] expected: VbrQuality) {
+        assert_eq!(input.prev(), expected);
     }
 
-    #[test]
-    fn format_duration_display() {
-        assert_eq!(format_duration(Duration::from_secs(65)), "01:05");
-        assert_eq!(format_duration(Duration::from_secs(3661)), "01:01:01");
-        assert_eq!(format_duration(Duration::from_secs(0)), "00:00");
+    #[rstest]
+    #[case(65, "01:05")]
+    #[case(3661, "01:01:01")]
+    #[case(0, "00:00")]
+    fn format_duration_display(#[case] secs: u64, #[case] expected: &str) {
+        assert_eq!(format_duration(Duration::from_secs(secs)), expected);
     }
 }

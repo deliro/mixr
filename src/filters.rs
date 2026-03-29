@@ -110,32 +110,25 @@ pub fn resolve_extensions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
     use std::path::Path;
 
-    #[test]
-    fn extension_filter_matches() {
+    #[rstest]
+    #[case("/music/song.mp3", true)]
+    #[case("/music/song.FLAC", true)]
+    #[case("/music/song.wav", false)]
+    #[case("/music/noext", false)]
+    fn extension_filter_matches(#[case] path: &str, #[case] passes: bool) {
         let f = FilterSet::new(
             vec!["mp3".to_string(), "flac".to_string()],
             None,
             None,
             false,
         );
-        assert!(matches!(
-            f.check(Path::new("/music/song.mp3"), 1000, None),
-            FilterResult::Pass
-        ));
-        assert!(matches!(
-            f.check(Path::new("/music/song.FLAC"), 1000, None),
-            FilterResult::Pass
-        ));
-        assert!(matches!(
-            f.check(Path::new("/music/song.wav"), 1000, None),
-            FilterResult::Reject
-        ));
-        assert!(matches!(
-            f.check(Path::new("/music/noext"), 1000, None),
-            FilterResult::Reject
-        ));
+        assert_eq!(
+            matches!(f.check(Path::new(path), 1000, None), FilterResult::Pass),
+            passes,
+        );
     }
 
     #[test]
@@ -147,66 +140,38 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn min_size_filter() {
+    #[rstest]
+    #[case(1000, true)]
+    #[case(2000, true)]
+    #[case(999, false)]
+    fn min_size_filter(#[case] size: u64, #[case] passes: bool) {
         let f = FilterSet::new(vec![], Some(ByteSize(1000)), None, false);
-        assert!(matches!(
-            f.check(Path::new("/song.mp3"), 1000, None),
-            FilterResult::Pass
-        ));
-        assert!(matches!(
-            f.check(Path::new("/song.mp3"), 2000, None),
-            FilterResult::Pass
-        ));
-        assert!(matches!(
-            f.check(Path::new("/song.mp3"), 999, None),
-            FilterResult::Reject
-        ));
+        assert_eq!(
+            matches!(
+                f.check(Path::new("/song.mp3"), size, None),
+                FilterResult::Pass
+            ),
+            passes,
+        );
     }
 
-    #[test]
-    fn live_filter() {
+    #[rstest]
+    #[case("/music/song live.mp3", false)]
+    #[case("/music/Song (Live).mp3", false)]
+    #[case("/music/live/song.mp3", false)]
+    #[case("/music/Live At Wembley/song.mp3", false)]
+    #[case("/music/olive/song.mp3", true)]
+    #[case("/music/deliver.mp3", true)]
+    #[case("/music/alive.mp3", true)]
+    #[case("/music/Nolive/song.mp3", true)]
+    #[case("/music/livewire.mp3", true)]
+    #[case("/music/LiveNation/song.mp3", true)]
+    fn live_filter(#[case] path: &str, #[case] passes: bool) {
         let f = FilterSet::new(vec![], None, None, true);
-        assert!(matches!(
-            f.check(Path::new("/music/song live.mp3"), 1000, None),
-            FilterResult::Reject
-        ));
-        assert!(matches!(
-            f.check(Path::new("/music/Song (Live).mp3"), 1000, None),
-            FilterResult::Reject
-        ));
-        assert!(matches!(
-            f.check(Path::new("/music/live/song.mp3"), 1000, None),
-            FilterResult::Reject
-        ));
-        assert!(matches!(
-            f.check(Path::new("/music/Live At Wembley/song.mp3"), 1000, None),
-            FilterResult::Reject
-        ));
-        assert!(matches!(
-            f.check(Path::new("/music/olive/song.mp3"), 1000, None),
-            FilterResult::Pass
-        ));
-        assert!(matches!(
-            f.check(Path::new("/music/deliver.mp3"), 1000, None),
-            FilterResult::Pass
-        ));
-        assert!(matches!(
-            f.check(Path::new("/music/alive.mp3"), 1000, None),
-            FilterResult::Pass
-        ));
-        assert!(matches!(
-            f.check(Path::new("/music/Nolive/song.mp3"), 1000, None),
-            FilterResult::Pass
-        ));
-        assert!(matches!(
-            f.check(Path::new("/music/livewire.mp3"), 1000, None),
-            FilterResult::Pass
-        ));
-        assert!(matches!(
-            f.check(Path::new("/music/LiveNation/song.mp3"), 1000, None),
-            FilterResult::Pass
-        ));
+        assert_eq!(
+            matches!(f.check(Path::new(path), 1000, None), FilterResult::Pass),
+            passes,
+        );
     }
 
     #[test]

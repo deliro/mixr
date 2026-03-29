@@ -1398,6 +1398,7 @@ pub fn format_ext_list(s: &str) -> String {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use rstest::rstest;
 
     fn key(code: KeyCode) -> Msg {
         Msg::Key(KeyEvent {
@@ -1665,30 +1666,37 @@ mod tests {
         assert!(model.shutdown.load(Ordering::Acquire));
     }
 
-    #[test]
-    fn setup_field_next_skips_bitrate_when_keep() {
-        let field = SetupField::Encoding;
-        assert_eq!(field.next(Encoding::Keep), SetupField::NoLive);
-        assert_eq!(field.next(Encoding::Cbr), SetupField::Bitrate);
-        assert_eq!(field.next(Encoding::Vbr), SetupField::Bitrate);
+    #[rstest]
+    #[case(Encoding::Keep, SetupField::NoLive)]
+    #[case(Encoding::Cbr, SetupField::Bitrate)]
+    #[case(Encoding::Vbr, SetupField::Bitrate)]
+    fn setup_field_next_skips_bitrate_when_keep(
+        #[case] encoding: Encoding,
+        #[case] expected: SetupField,
+    ) {
+        assert_eq!(SetupField::Encoding.next(encoding), expected);
     }
 
-    #[test]
-    fn setup_field_prev_skips_bitrate_when_keep() {
-        let field = SetupField::NoLive;
-        assert_eq!(field.prev(Encoding::Keep), SetupField::Encoding);
-        assert_eq!(field.prev(Encoding::Cbr), SetupField::Bitrate);
-        assert_eq!(field.prev(Encoding::Vbr), SetupField::Bitrate);
+    #[rstest]
+    #[case(Encoding::Keep, SetupField::Encoding)]
+    #[case(Encoding::Cbr, SetupField::Bitrate)]
+    #[case(Encoding::Vbr, SetupField::Bitrate)]
+    fn setup_field_prev_skips_bitrate_when_keep(
+        #[case] encoding: Encoding,
+        #[case] expected: SetupField,
+    ) {
+        assert_eq!(SetupField::NoLive.prev(encoding), expected);
     }
 
-    #[test]
-    fn field_is_invalid_min_duration() {
-        assert!(!field_is_invalid(SetupField::MinDuration, ""));
-        assert!(!field_is_invalid(SetupField::MinDuration, "30s"));
-        assert!(!field_is_invalid(SetupField::MinDuration, "2m"));
-        assert!(!field_is_invalid(SetupField::MinDuration, "2:30"));
-        assert!(field_is_invalid(SetupField::MinDuration, "abc"));
-        assert!(field_is_invalid(SetupField::MinDuration, "0"));
+    #[rstest]
+    #[case("", false)]
+    #[case("30s", false)]
+    #[case("2m", false)]
+    #[case("2:30", false)]
+    #[case("abc", true)]
+    #[case("0", true)]
+    fn field_is_invalid_min_duration(#[case] input: &str, #[case] invalid: bool) {
+        assert_eq!(field_is_invalid(SetupField::MinDuration, input), invalid);
     }
 
     #[test]
