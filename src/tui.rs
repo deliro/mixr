@@ -124,9 +124,7 @@ fn spawn_copier(
     model: &Model,
 ) {
     let shutdown = Arc::clone(&model.shutdown);
-    let destination = config.destination.clone();
-    let keep_names = config.keep_names;
-    let overwrite = config.overwrite;
+    let config = config.clone();
 
     thread::spawn(move || {
         let copy_tx = {
@@ -141,14 +139,7 @@ fn spawn_copier(
             });
             stx
         };
-        copier::copy_files(
-            &files,
-            &destination,
-            keep_names,
-            overwrite,
-            &copy_tx,
-            &shutdown,
-        );
+        copier::copy_files(&files, &config, &copy_tx, &shutdown);
     });
 }
 

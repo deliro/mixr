@@ -7,7 +7,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 use std::thread;
 
-use crate::types::{ByteSize, FileEntry};
+use crate::types::{ByteSize, Config, Encoding, FileEntry, VbrQuality};
 
 const BUF_SIZE: usize = 1024 * 1024;
 const PIPE_CAPACITY: usize = 4_usize;
@@ -67,16 +67,14 @@ enum PipeMsg {
 
 pub fn copy_files(
     files: &[FileEntry],
-    destination: &Path,
-    keep_names: bool,
-    overwrite: bool,
+    config: &Config,
     tx: &Sender<CopyMsg>,
     shutdown: &Arc<AtomicBool>,
 ) {
-    if let Err(e) = fs::create_dir_all(destination) {
+    if let Err(e) = fs::create_dir_all(&config.destination) {
         let _ = tx.send(CopyMsg::Error {
             index: 0_usize,
-            path: destination.to_path_buf(),
+            path: config.destination.clone(),
             error: e.to_string(),
             is_destination: true,
         });
@@ -92,28 +90,48 @@ pub fn copy_files(
         writer_thread(pipe_rx, &progress_tx, &writer_shutdown);
     });
 
-    reader_thread(
-        files,
-        destination,
-        keep_names,
-        overwrite,
-        &pipe_tx,
-        shutdown,
-    );
+    reader_thread(files, config, &pipe_tx, shutdown);
 
     drop(pipe_tx);
     let _ = writer_handle.join();
 }
 
+fn needs_transcode(entry: &FileEntry, config: &Config) -> bool {
+    match config.encoding {
+        Encoding::Keep => false,
+        Encoding::Cbr | Encoding::Vbr => {
+            let ext = entry
+                .path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if ext != "mp3" {
+                return true;
+            }
+            let threshold = match config.encoding {
+                Encoding::Cbr => u32::from(config.cbr_bitrate.unwrap_or(0_u16)),
+                Encoding::Vbr => u32::from(
+                    config
+                        .vbr_quality
+                        .unwrap_or(VbrQuality::Medium)
+                        .avg_bitrate_kbps(),
+                ),
+                Encoding::Keep => return false,
+            };
+            entry.bitrate_kbps.is_some_and(|br| br > threshold)
+        }
+    }
+}
+
 fn reader_thread(
     files: &[FileEntry],
-    destination: &Path,
-    keep_names: bool,
-    overwrite: bool,
+    config: &Config,
     pipe_tx: &mpsc::SyncSender<PipeMsg>,
     shutdown: &Arc<AtomicBool>,
 ) {
     let mut counter = 1_usize;
+    let destination = &config.destination;
 
     for (index, entry) in files.iter().enumerate() {
         if shutdown.load(Ordering::Relaxed) {
@@ -121,13 +139,8 @@ fn reader_thread(
             return;
         }
 
-        let _ = pipe_tx.send(PipeMsg::Preparing {
-            index,
-            converting: false,
-        });
-
-        let dest_path = if keep_names {
-            if overwrite {
+        let dest_path = if config.keep_names {
+            if config.overwrite {
                 destination.join(
                     entry
                         .path
@@ -139,42 +152,91 @@ fn reader_thread(
                 dest_path_keep_name(destination, &entry.path)
             }
         } else {
-            let (path, next) = dest_path_numbered(destination, counter, &entry.path, overwrite);
+            let (path, next) =
+                dest_path_numbered(destination, counter, &entry.path, config.overwrite);
             counter = next;
             path
         };
 
-        let name = dest_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown")
-            .to_string();
+        if needs_transcode(entry, config) {
+            let _ = pipe_tx.send(PipeMsg::Preparing {
+                index,
+                converting: true,
+            });
 
-        let src_file = match fs::File::open(&entry.path) {
-            Ok(f) => f,
-            Err(e) => {
-                let _ = pipe_tx.send(PipeMsg::SkipFile {
-                    index,
-                    path: entry.path.clone(),
-                    error: e.to_string(),
-                });
+            let dest_path = dest_path.with_extension("mp3");
+            let name = dest_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+
+            let _ = pipe_tx.send(PipeMsg::StartFile {
+                index,
+                dest_path,
+                name,
+                original_path: entry.path.clone(),
+                size: entry.size,
+            });
+
+            let tc_config = crate::transcoder::TranscodeConfig {
+                encoding: config.encoding,
+                cbr_bitrate: config.cbr_bitrate,
+                vbr_quality: config.vbr_quality,
+            };
+
+            match crate::transcoder::transcode(&entry.path, &tc_config, &mut |chunk| {
+                let _ = pipe_tx.send(PipeMsg::Chunk(chunk.to_vec()));
+            }) {
+                Ok(()) => {
+                    let _ = pipe_tx.send(PipeMsg::EndFile { index });
+                }
+                Err(e) => {
+                    let _ = pipe_tx.send(PipeMsg::SkipFile {
+                        index,
+                        path: entry.path.clone(),
+                        error: e,
+                    });
+                }
+            }
+        } else {
+            let _ = pipe_tx.send(PipeMsg::Preparing {
+                index,
+                converting: false,
+            });
+
+            let name = dest_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+
+            let src_file = match fs::File::open(&entry.path) {
+                Ok(f) => f,
+                Err(e) => {
+                    let _ = pipe_tx.send(PipeMsg::SkipFile {
+                        index,
+                        path: entry.path.clone(),
+                        error: e.to_string(),
+                    });
+                    continue;
+                }
+            };
+
+            let _ = pipe_tx.send(PipeMsg::StartFile {
+                index,
+                dest_path,
+                name,
+                original_path: entry.path.clone(),
+                size: entry.size,
+            });
+
+            if !read_file_chunks(src_file, index, &entry.path, pipe_tx) {
                 continue;
             }
-        };
 
-        let _ = pipe_tx.send(PipeMsg::StartFile {
-            index,
-            dest_path,
-            name,
-            original_path: entry.path.clone(),
-            size: entry.size,
-        });
-
-        if !read_file_chunks(src_file, index, &entry.path, pipe_tx) {
-            continue;
+            let _ = pipe_tx.send(PipeMsg::EndFile { index });
         }
-
-        let _ = pipe_tx.send(PipeMsg::EndFile { index });
     }
 
     let _ = pipe_tx.send(PipeMsg::Done);
@@ -413,9 +475,27 @@ fn cleanup_partial(path: &Path) -> io::Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use std::sync::mpsc;
+
+    fn keep_config(src: &Path, dst: &Path, keep_names: bool, overwrite: bool) -> Config {
+        Config {
+            source: src.to_path_buf(),
+            destination: dst.to_path_buf(),
+            max_size: None,
+            min_file_size: None,
+            min_duration: None,
+            no_live: false,
+            keep_names,
+            overwrite,
+            allowed_extensions: vec![],
+            encoding: Encoding::Keep,
+            cbr_bitrate: None,
+            vbr_quality: None,
+        }
+    }
 
     fn make_source_files(dir: &Path) -> Vec<FileEntry> {
         let f1 = dir.join("song1.mp3");
@@ -443,10 +523,11 @@ mod tests {
         let src = tempfile::tempdir().unwrap();
         let dst = tempfile::tempdir().unwrap();
         let files = make_source_files(src.path());
+        let config = keep_config(src.path(), dst.path(), false, false);
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
 
-        copy_files(&files, dst.path(), false, false, &tx, &shutdown);
+        copy_files(&files, &config, &tx, &shutdown);
 
         let messages: Vec<CopyMsg> = rx.try_iter().collect();
         assert!(matches!(messages.last().unwrap(), CopyMsg::Complete));
@@ -464,10 +545,11 @@ mod tests {
         let src = tempfile::tempdir().unwrap();
         let dst = tempfile::tempdir().unwrap();
         let files = make_source_files(src.path());
+        let config = keep_config(src.path(), dst.path(), true, false);
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
 
-        copy_files(&files, dst.path(), true, false, &tx, &shutdown);
+        copy_files(&files, &config, &tx, &shutdown);
 
         let messages: Vec<CopyMsg> = rx.try_iter().collect();
         assert!(matches!(messages.last().unwrap(), CopyMsg::Complete));
@@ -489,10 +571,11 @@ mod tests {
             duration: None,
             bitrate_kbps: None,
         }];
+        let config = keep_config(src.path(), dst.path(), true, false);
         let (tx, _rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
 
-        copy_files(&files, dst.path(), true, false, &tx, &shutdown);
+        copy_files(&files, &config, &tx, &shutdown);
 
         assert!(dst.path().join("(1) song.mp3").exists());
     }
@@ -506,10 +589,11 @@ mod tests {
             duration: None,
             bitrate_kbps: None,
         }];
+        let config = keep_config(Path::new("/nonexistent"), dst.path(), false, false);
         let (tx, rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
 
-        copy_files(&files, dst.path(), false, false, &tx, &shutdown);
+        copy_files(&files, &config, &tx, &shutdown);
 
         let messages: Vec<CopyMsg> = rx.try_iter().collect();
         let has_error = messages.iter().any(|m| {
@@ -531,12 +615,51 @@ mod tests {
         let src = tempfile::tempdir().unwrap();
         let dst = tempfile::tempdir().unwrap();
         let files = make_source_files(src.path());
+        let config = keep_config(src.path(), dst.path(), false, false);
         let (tx, _rx) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(true));
 
-        copy_files(&files, dst.path(), false, false, &tx, &shutdown);
+        copy_files(&files, &config, &tx, &shutdown);
 
         assert!(!dst.path().join("00001.mp3").exists());
+    }
+
+    #[test]
+    fn copy_with_transcode_wav_to_mp3() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let wav_path = src.path().join("song.wav");
+        crate::probe::tests::create_wav(&wav_path, 44100_u32, 2_u16, 1_u32);
+
+        let files = vec![FileEntry {
+            path: wav_path,
+            size: ByteSize(176_400),
+            duration: Some(std::time::Duration::from_secs(1)),
+            bitrate_kbps: Some(1411),
+        }];
+
+        let config = Config {
+            source: src.path().to_path_buf(),
+            destination: dst.path().to_path_buf(),
+            max_size: None,
+            min_file_size: None,
+            min_duration: None,
+            no_live: false,
+            keep_names: true,
+            overwrite: false,
+            allowed_extensions: vec![],
+            encoding: Encoding::Cbr,
+            cbr_bitrate: Some(128_u16),
+            vbr_quality: None,
+        };
+
+        let (tx, rx) = mpsc::channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        copy_files(&files, &config, &tx, &shutdown);
+
+        let messages: Vec<CopyMsg> = rx.try_iter().collect();
+        assert!(messages.iter().any(|m| matches!(m, CopyMsg::Complete)));
+        assert!(dst.path().join("song.mp3").exists());
     }
 
     #[test]
