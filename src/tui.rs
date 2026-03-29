@@ -344,10 +344,7 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
             format!("{:<label_width$}", locale.encoding_label),
             encoding_style,
         ),
-        Span::styled(
-            format!("\u{25c0} {encoding_value} \u{25b6}"),
-            encoding_style,
-        ),
+        Span::styled(format!("< {encoding_value} >"), encoding_style),
     ]);
     if let Some(chunk) = chunks.get(7) {
         frame.render_widget(Paragraph::new(encoding_line), *chunk);
@@ -359,7 +356,7 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
                 .get(form.cbr_bitrate_idx)
                 .copied()
                 .unwrap_or(192);
-            Some((locale.bitrate_label, format!("\u{25c0} {br} kbps \u{25b6}")))
+            Some((locale.bitrate_label, format!("< {br} kbps >")))
         }
         Encoding::Vbr => {
             let q = match form.vbr_quality {
@@ -367,7 +364,7 @@ fn view_setup(form: &SetupForm, locale: &Locale, frame: &mut Frame, area: Rect) 
                 VbrQuality::Medium => locale.quality_medium,
                 VbrQuality::Low => locale.quality_low,
             };
-            Some((locale.quality_label, format!("\u{25c0} {q} \u{25b6}")))
+            Some((locale.quality_label, format!("< {q} >")))
         }
         Encoding::Keep => None,
     };
