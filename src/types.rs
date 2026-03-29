@@ -194,8 +194,6 @@ impl VbrQuality {
 pub struct FileEntry {
     pub path: PathBuf,
     pub size: ByteSize,
-    #[allow(dead_code)]
-    pub duration: Option<Duration>,
     pub bitrate_kbps: Option<u32>,
 }
 
@@ -218,77 +216,19 @@ pub struct Config {
 pub const DEFAULT_EXTENSIONS: &[&str] = &["mp3", "flac", "ogg", "wav", "m4a", "aac", "wma"];
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum Error {
-    SourceNotFound(PathBuf),
-    InvalidSize(ParseSizeError),
-    ScanFailed {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    ReadFailed {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    WriteFailed {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    CreateDirFailed {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    DiskSpaceQuery {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    InvalidDuration(ParseDurationError),
     Terminal(std::io::Error),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::SourceNotFound(p) => write!(f, "source not found: {}", p.display()),
-            Self::InvalidSize(e) => write!(f, "invalid size: {e}"),
-            Self::ScanFailed { path, source } => {
-                write!(f, "scan failed at {}: {source}", path.display())
-            }
-            Self::ReadFailed { path, source } => {
-                write!(f, "read failed {}: {source}", path.display())
-            }
-            Self::WriteFailed { path, source } => {
-                write!(f, "write failed {}: {source}", path.display())
-            }
-            Self::CreateDirFailed { path, source } => {
-                write!(f, "failed to create {}: {source}", path.display())
-            }
-            Self::DiskSpaceQuery { path, source } => {
-                write!(
-                    f,
-                    "disk space query failed for {}: {source}",
-                    path.display()
-                )
-            }
-            Self::InvalidDuration(e) => write!(f, "invalid duration: {e}"),
             Self::Terminal(e) => write!(f, "terminal error: {e}"),
         }
     }
 }
 
 impl std::error::Error for Error {}
-
-impl From<ParseSizeError> for Error {
-    fn from(e: ParseSizeError) -> Self {
-        Self::InvalidSize(e)
-    }
-}
-
-impl From<ParseDurationError> for Error {
-    fn from(e: ParseDurationError) -> Self {
-        Self::InvalidDuration(e)
-    }
-}
 
 pub fn format_duration(d: Duration) -> String {
     let secs = d.as_secs();

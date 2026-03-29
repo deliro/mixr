@@ -49,9 +49,6 @@ pub struct Locale {
     pub cli_fatal: &'static str,
     pub cli_errors: &'static str,
 
-    #[allow(dead_code)]
-    pub about: &'static str,
-
     pub min_duration: &'static str,
     pub encoding_label: &'static str,
     pub bitrate_label: &'static str,
@@ -123,8 +120,6 @@ pub static EN: Locale = Locale {
     cli_fatal: "Fatal error",
     cli_errors: "errors",
 
-    about: "Fill your flash drive with random music",
-
     min_duration: "Min duration:",
     encoding_label: "Encoding:",
     bitrate_label: "Bitrate:",
@@ -195,8 +190,6 @@ pub static RU: Locale = Locale {
     cli_copying: "Копирование",
     cli_fatal: "Критическая ошибка",
     cli_errors: "ошибок",
-
-    about: "Заполни флешку случайной музыкой",
 
     min_duration: "Мин. длит.:",
     encoding_label: "Кодирование:",
