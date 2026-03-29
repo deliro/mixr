@@ -61,16 +61,12 @@ pub fn transcode(
     let mut format = probed.format;
     let track = format.default_track().ok_or("no default track")?;
     let track_id = track.id;
-    let sample_rate = track.codec_params.sample_rate.ok_or("no sample rate")?;
-    let channels = track.codec_params.channels.ok_or("no channels")?.count();
-    let channels_u8 = u8::try_from(channels).map_err(|e| e.to_string())?;
 
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| e.to_string())?;
 
-    let mut encoder = build_encoder(config, channels_u8, sample_rate)?;
-
+    let mut encoder: Option<mp3lame_encoder::Encoder> = None;
     let mut mp3_buf: Vec<u8> = Vec::new();
     let mut sample_buf: Option<SampleBuffer<i16>> = None;
 
@@ -102,9 +98,18 @@ pub fn transcode(
         buf.copy_interleaved_ref(decoded);
         let samples = buf.samples();
 
+        let enc = if let Some(e) = &mut encoder {
+            e
+        } else {
+            let channels = spec.channels.count();
+            let channels_u8 = u8::try_from(channels).map_err(|e| e.to_string())?;
+            let sample_rate = spec.rate;
+            encoder = Some(build_encoder(config, channels_u8, sample_rate)?);
+            encoder.as_mut().ok_or("encoder init failed")?
+        };
+
         mp3_buf.reserve(mp3lame_encoder::max_required_buffer_size(samples.len()));
-        encoder
-            .encode_to_vec(InterleavedPcm(samples), &mut mp3_buf)
+        enc.encode_to_vec(InterleavedPcm(samples), &mut mp3_buf)
             .map_err(|e| format!("{e:?}"))?;
 
         if !mp3_buf.is_empty() {
@@ -113,13 +118,14 @@ pub fn transcode(
         }
     }
 
-    mp3_buf.reserve(7200_usize);
-    encoder
-        .flush_to_vec::<FlushNoGap>(&mut mp3_buf)
-        .map_err(|e| format!("{e:?}"))?;
+    if let Some(mut enc) = encoder {
+        mp3_buf.reserve(7200_usize);
+        enc.flush_to_vec::<FlushNoGap>(&mut mp3_buf)
+            .map_err(|e| format!("{e:?}"))?;
 
-    if !mp3_buf.is_empty() {
-        on_chunk(&mp3_buf);
+        if !mp3_buf.is_empty() {
+            on_chunk(&mp3_buf);
+        }
     }
 
     Ok(())
