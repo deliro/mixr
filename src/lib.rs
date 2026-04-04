@@ -9,6 +9,7 @@
 pub mod app;
 pub mod cli;
 pub mod copier;
+pub mod dedup;
 pub mod filters;
 pub mod i18n;
 pub mod probe;

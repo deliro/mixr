@@ -7,6 +7,7 @@ use rand::rng;
 use rand::seq::SliceRandom;
 use walkdir::WalkDir;
 
+use crate::dedup;
 use crate::filters::{FilterResult, FilterSet};
 use crate::probe;
 use crate::types::{ByteSize, FileEntry};
@@ -92,6 +93,7 @@ pub fn scan(
         }
     }
 
+    let mut entries = dedup::deduplicate(entries);
     entries.shuffle(&mut rng());
     let selected = pack_into_budget(entries, budget);
     let _ = tx.send(ScanMsg::Complete(selected));
